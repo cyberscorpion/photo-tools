@@ -1,18 +1,20 @@
 :root {
-  --bg-deep: #1a1a1a;
-  --bg-panel: #252525;
-  --bg-toolbar: #2d2d2d;
-  --bg-menu: #323232;
-  --bg-hover: #3a3a3a;
-  --bg-active: #404040;
-  --border: #404040;
-  --border-light: #4a4a4a;
-  --accent: #0078d4;
-  --accent-hover: #1084d8;
-  --text: #cccccc;
-  --text-dim: #888888;
-  --text-bright: #ffffff;
-  --danger: #e74c3c;
+  /* ── Photopea-inspired palette ───────────────────────────────────────── */
+  --bg-deep:      #1e1e1e;   /* Deepest: inputs, dropdowns, modals        */
+  --bg-workspace: #4a4a4a;   /* Canvas workspace area — Photopea mid-gray */
+  --bg-panel:     #252525;   /* Side panels                               */
+  --bg-toolbar:   #303030;   /* Top/left toolbars                         */
+  --bg-menu:      #2a2a2a;   /* Menu bar                                  */
+  --bg-hover:     #3c3c3c;   /* Hover                                     */
+  --bg-active:    #484848;   /* Selected / active                         */
+  --border:       #3e3e3e;   /* Standard borders                          */
+  --border-light: #505050;   /* Lighter dividers                          */
+  --accent:       #4a7fcf;   /* Blue accent — softer than #0078d4         */
+  --accent-hover: #5a8fd8;
+  --text:         #d0d0d0;   /* Primary text                              */
+  --text-dim:     #909090;   /* Dimmed text / hints                       */
+  --text-bright:  #f0f0f0;   /* Highlighted / active text                 */
+  --danger:  #e74c3c;
   --success: #27ae60;
   --toolbar-w: 80px;
   --panel-w: 240px;

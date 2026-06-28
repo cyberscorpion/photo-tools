@@ -1,34 +1,51 @@
 import { getFabric } from '../canvas/fabricManager.ts'
-import { FabricImage } from 'fabric'
+
+/** Get the lower (rendering) canvas element */
+export function getLowerCanvasEl(): HTMLCanvasElement | null {
+  const fc = getFabric() as any
+  return (fc?.lowerCanvasEl as HTMLCanvasElement | undefined) ?? null
+}
 
 /** Get the lower canvas 2D context from Fabric */
 export function getLowerCtx(): CanvasRenderingContext2D | null {
-  const fc = getFabric()
+  const fc = getFabric() as any
   if (!fc) return null
-  return (fc.getElement() as HTMLCanvasElement).getContext('2d')
+  const lowerEl = (fc.lowerCanvasEl ?? fc._objects?.[0]?.canvas?.lowerCanvasEl) as HTMLCanvasElement | undefined
+  if (!lowerEl) return null
+  return lowerEl.getContext('2d')
 }
 
 /** Reload the entire lower canvas content as a new base FabricImage, replacing the background layer */
 export async function reloadCanvasAsImage(): Promise<void> {
-  const fc = getFabric()
+  const fc = getFabric() as any
   if (!fc) return
-  const srcEl = fc.getElement() as HTMLCanvasElement
-  const w = fc.width!, h = fc.height!
-  // Capture before clearing
-  const off = document.createElement('canvas')
-  off.width = w; off.height = h
-  off.getContext('2d')!.drawImage(srcEl, 0, 0)
-  const dataURL = off.toDataURL('image/png')
+  const lowerEl = fc.lowerCanvasEl as HTMLCanvasElement | undefined
+  if (!lowerEl) return
+  const w = fc.width as number
+  const h = fc.height as number
 
-  // Remove old background image
-  const objs = fc.getObjects()
-  const bg = objs.find((o: any) => o.layerId === 'background')
+  // Capture modified lower canvas FIRST (before Fabric can overwrite it)
+  const snap = document.createElement('canvas')
+  snap.width = w; snap.height = h
+  snap.getContext('2d')!.drawImage(lowerEl, 0, 0)
+  const blob = await new Promise<Blob>((res) => snap.toBlob(b => res(b!), 'image/png'))
+  const dataURL = await new Promise<string>((res) => {
+    const reader = new FileReader()
+    reader.onload = (ev) => res(ev.target!.result as string)
+    reader.readAsDataURL(blob)
+  })
+
+  // Replace the base background image with the captured content
+  const { FabricImage } = await import('fabric')
+  const objects = (fc.getObjects() as any[])
+  const bg = objects.find((o: any) => o.layerId !== 'contour' && o.layerId !== 'selection' && o.layerId !== 'crop-overlay')
+  const bgLayerId = bg?.layerId ?? 'background'
   if (bg) fc.remove(bg)
 
   const img = await FabricImage.fromURL(dataURL)
-  img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: 'background' } as any)
+  img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: bgLayerId } as any)
   fc.add(img)
-  fc.sendObjectToBack(img)
+  fc.sendObjectToBack(img as any)
   fc.renderAll()
 }
 

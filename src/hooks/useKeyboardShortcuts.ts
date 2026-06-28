@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useEditorStore } from '../store/editorStore.js'
 import { getFabric } from '../canvas/fabricManager.js'
 import { confirmCrop, cancelCrop } from '../canvas/toolHandlers.js'
+import { getLowerCtx, reloadCanvasAsImage } from '../utils/canvasOps.js'
 
 const TOOL_SHORTCUTS = {
   v: 'select', b: 'brush', e: 'eraser', t: 'text',
@@ -94,9 +95,21 @@ export function useKeyboardShortcuts() {
               fc.requestRenderAll()
             })()
             return
+          case 'c':
+            e.preventDefault()
+            import('../canvas/clipboard.ts').then(({ copySelected }) => copySelected())
+            return
+          case 'x':
+            e.preventDefault()
+            import('../canvas/clipboard.ts').then(({ cutSelected }) => cutSelected())
+            return
+          case 'v':
+            e.preventDefault()
+            import('../canvas/clipboard.ts').then(({ pasteClipboard }) => pasteClipboard())
+            return
           case 'd':
             e.preventDefault()
-            if (fc) { fc.discardActiveObject(); fc.renderAll() }
+            import('../canvas/clipboard.ts').then(({ duplicateSelected }) => duplicateSelected())
             return
           case '=':
           case '+': {
@@ -120,6 +133,43 @@ export function useKeyboardShortcuts() {
             e.preventDefault()
             useEditorStore.getState().addTab?.()
             return
+          case 'g':
+            e.preventDefault()
+            ;(async () => {
+              const fc = getFabric()
+              if (!fc) return
+              const active = fc.getActiveObjects()
+              if (active.length < 2) return
+              const { Group } = await import('fabric')
+              const group = new Group(active, { selectable: true, evented: true } as any)
+              active.forEach((o: any) => fc.remove(o))
+              fc.discardActiveObject()
+              fc.add(group as any)
+              fc.setActiveObject(group as any)
+              fc.renderAll()
+              useEditorStore.getState().pushHistory('Group', fc.toJSON(['customId', 'layerId']))
+            })()
+            return
+          case 'e':
+            if (e.shiftKey) {
+              // Ctrl+Shift+E: flatten visible layers to one image
+              e.preventDefault()
+              ;(async () => {
+                const fc = getFabric()
+                if (!fc) return
+                await reloadCanvasAsImage()
+                useEditorStore.getState().pushHistory('Flatten', fc.toJSON(['customId', 'layerId']))
+              })()
+              return
+            }
+            return
+          case 'n':
+            if (e.shiftKey) {
+              e.preventDefault()
+              useEditorStore.getState().addLayer('Layer ' + (useEditorStore.getState().layers.length + 1))
+              return
+            }
+            return
           default:
             return
         }
@@ -129,6 +179,57 @@ export function useKeyboardShortcuts() {
       if (isHtmlInput) return
 
       const { cropMode, toolOptions } = useEditorStore.getState()
+
+      // Alt+Delete: fill canvas with foreground color
+      if (key === 'delete' && e.altKey) {
+        e.preventDefault()
+        const { foregroundColor } = useEditorStore.getState()
+        const fc = getFabric()
+        if (fc) {
+          const ctx = getLowerCtx()
+          if (ctx) {
+            ctx.fillStyle = foregroundColor
+            ctx.fillRect(0, 0, fc.width!, fc.height!)
+            reloadCanvasAsImage().then(() => {
+              useEditorStore.getState().pushHistory('Fill FG', fc.toJSON(['customId', 'layerId']))
+            })
+          }
+        }
+        return
+      }
+
+      // Ctrl+Backspace: fill canvas with background color
+      if ((key === 'backspace') && ctrl) {
+        e.preventDefault()
+        const { backgroundColor } = useEditorStore.getState()
+        const fc = getFabric()
+        if (fc) {
+          const ctx = getLowerCtx()
+          if (ctx) {
+            ctx.fillStyle = backgroundColor
+            ctx.fillRect(0, 0, fc.width!, fc.height!)
+            reloadCanvasAsImage().then(() => {
+              useEditorStore.getState().pushHistory('Fill BG', fc.toJSON(['customId', 'layerId']))
+            })
+          }
+        }
+        return
+      }
+
+      // Tab: toggle all panels visibility
+      if (key === 'tab') {
+        e.preventDefault()
+        const { panels, togglePanel } = useEditorStore.getState()
+        const anyOpen = Object.values(panels).some(Boolean)
+        if (anyOpen) {
+          Object.keys(panels).forEach(p => {
+            if ((panels as Record<string, boolean>)[p]) togglePanel(p)
+          })
+        } else {
+          ;['layers', 'adjustments'].forEach(p => togglePanel(p))
+        }
+        return
+      }
 
       // Fit to screen
       if (key === 'f') { setZoom(1); return }

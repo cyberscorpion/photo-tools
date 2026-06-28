@@ -1,5 +1,6 @@
 import React from 'react'
 import { useEditorStore } from '../../store/editorStore.js'
+import { useLocalFonts } from '../../hooks/useLocalFonts.ts'
 import { confirmCrop, cancelCrop } from '../../canvas/toolHandlers.js'
 import { getFabric } from '../../canvas/fabricManager.js'
 import { reloadCanvasAsImage, applyMaskFill, applyMaskErase, hexToRgbArr, getLowerCtx } from '../../utils/canvasOps.js'
@@ -59,6 +60,7 @@ export default function OptionsBar() {
   const activeSelection = useEditorStore((s) => s.activeSelection)
   const clearSelection = useEditorStore((s) => s.clearSelection)
   const foregroundColor = useEditorStore((s) => s.foregroundColor)
+  const { fonts: availableFonts } = useLocalFonts()
 
   const fillFG = async () => {
     const ctx = getLowerCtx()
@@ -390,11 +392,13 @@ export default function OptionsBar() {
           <select
             value={opts.font}
             onChange={(e) => setToolOption('text', 'font', e.target.value)}
+            style={{ maxWidth: 140, fontSize: 11 }}
           >
-            <option value="Arial">Arial</option>
-            <option value="Georgia">Georgia</option>
-            <option value="Courier New">Courier New</option>
-            <option value="Impact">Impact</option>
+            {availableFonts.map((family) => (
+              <option key={family} value={family} style={{ fontFamily: family }}>
+                {family}
+              </option>
+            ))}
           </select>
         </div>
         <div style={sliderWrapStyle}>

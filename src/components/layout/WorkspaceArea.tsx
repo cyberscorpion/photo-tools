@@ -55,37 +55,49 @@ export default function WorkspaceArea({ onCursorMove }) {
       onMouseMove={handleMouseMove}
       style={{
         overflow: 'auto',
-        background: 'var(--bg-deep)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
+        background: 'var(--bg-workspace)',
         gridArea: 'workspace',
+        height: '100%',
+        // display:flex so the inner div can use margin:auto for centering.
+        // NEVER use justify-content/align-items:center here — when the canvas
+        // is larger than the viewport that positions the item at a negative
+        // offset (cut off left/top permanently). margin:auto on the ITEM
+        // collapses to 0 when there is no surplus space, keeping the item
+        // at origin so every pixel is reachable by scrolling.
+        display: 'flex',
       }}
     >
-      {/* Phantom div sized to the zoomed canvas — gives the scrollbar its range */}
+      {/* margin:auto centers when smaller than viewport; 0 when larger → fully scrollable */}
       <div
         style={{
-          width: canvasW * zoom,
-          height: canvasH * zoom,
-          position: 'relative',
+          margin: 'auto',
+          padding: 80,
           flexShrink: 0,
         }}
       >
-        {/* Actual canvas wrapper: CSS-scaled for visual zoom */}
+        {/* Phantom div: gives the scrollbar its range = zoomed canvas size */}
         <div
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: canvasW,
-            height: canvasH,
-            transform: `scale(${zoom})`,
-            transformOrigin: '0 0',
+            width: canvasW * zoom,
+            height: canvasH * zoom,
+            position: 'relative',
           }}
         >
-          <CheckerBackground width={canvasW} height={canvasH} />
-          <CanvasStage />
+          {/* Canvas wrapper: CSS-scaled for visual zoom */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: canvasW,
+              height: canvasH,
+              transform: `scale(${zoom})`,
+              transformOrigin: '0 0',
+            }}
+          >
+            <CheckerBackground width={canvasW} height={canvasH} />
+            <CanvasStage />
+          </div>
         </div>
       </div>
     </div>

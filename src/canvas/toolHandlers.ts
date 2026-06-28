@@ -820,7 +820,7 @@ function activateCrop(fc) {
 
     clearOverlay()
 
-    const srcEl   = fc.getElement()
+    const srcEl   = ((fc as any).lowerCanvasEl ?? fc.getElement()) as HTMLCanvasElement
     const offscreen = document.createElement('canvas')
     offscreen.width  = w
     offscreen.height = h
@@ -871,7 +871,7 @@ function activateEyedropper(fc, _toolOptions, storeActions) {
 
   const onMouseDown = (e) => {
     const point = getPointer(fc, e)
-    const ctx = fc.getContext('2d') ?? fc.lowerCanvasEl?.getContext('2d')
+    const ctx = ((fc as any).lowerCanvasEl as HTMLCanvasElement)?.getContext('2d')
     if (!ctx) return
 
     const vpt = fc.viewportTransform

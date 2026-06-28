@@ -38,6 +38,27 @@ export default function StatusBar({ cursorX, cursorY }) {
           X: {cursorX} Y: {cursorY}
         </span>
       )}
+
+      {/* Credits — pushed to the far right */}
+      <a
+        href="https://www.linkedin.com/in/rajatjain-cs/"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          marginLeft: 'auto',
+          fontSize: 11,
+          color: 'var(--text-bright)',
+          textDecoration: 'none',
+          opacity: 0.85,
+          transition: 'opacity 0.15s',
+          whiteSpace: 'nowrap',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+        title="Rajat Jain — LinkedIn"
+      >
+        Made by Rajat Jain
+      </a>
     </div>
   )
 }

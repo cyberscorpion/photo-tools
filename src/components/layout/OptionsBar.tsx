@@ -146,8 +146,22 @@ export default function OptionsBar() {
     )
   }
 
-  if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
-    return <div style={barStyle}><span style={labelStyle}>Drag to select • Shift = constrain</span></div>
+  if (activeTool === 'marquee-rect') {
+    return (
+      <div style={barStyle}>
+        <span style={labelStyle}>Drag to select • Shift = constrain</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: add • Alt: subtract</span>
+      </div>
+    )
+  }
+
+  if (activeTool === 'marquee-ellipse') {
+    return (
+      <div style={barStyle}>
+        <span style={labelStyle}>Drag to select • Shift = constrain</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: add • Alt: subtract</span>
+      </div>
+    )
   }
 
   if (activeTool === 'magic-wand') {
@@ -158,6 +172,7 @@ export default function OptionsBar() {
         <input type="range" min={0} max={255} value={opts.tolerance}
           onChange={e => setToolOption('magic-wand', 'tolerance', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.tolerance}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: add to selection</span>
       </div>
     )
   }
@@ -175,6 +190,7 @@ export default function OptionsBar() {
         <span style={labelStyle}>Width</span>
         <input type="number" min={1} max={50} value={opts.strokeWidth} onChange={e => setToolOption('line', 'strokeWidth', +e.target.value)} style={{ width: 48 }} />
         <span style={labelStyle}>⇧ Shift = 45° snap</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: 45° snap</span>
       </div>
     )
   }
@@ -189,6 +205,7 @@ export default function OptionsBar() {
         <input type="range" min={0} max={100} value={opts.radius} onChange={e => setToolOption('rounded-rect', 'radius', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.radius}px</span>
         <span style={{ ...labelStyle, opacity: 0.6 }}>⇧ Shift = square</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: square • Alt: from center</span>
       </div>
     )
   }
@@ -202,6 +219,7 @@ export default function OptionsBar() {
         <span style={labelStyle}>Sides</span>
         <input type="range" min={3} max={12} value={opts.sides} onChange={e => setToolOption('polygon', 'sides', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.sides}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: snap angle</span>
       </div>
     )
   }
@@ -233,6 +251,7 @@ export default function OptionsBar() {
         <span style={labelStyle}>Opacity</span>
         <input type="range" min={1} max={100} value={opts.opacity} onChange={e => setToolOption('gradient', 'opacity', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.opacity}%</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: constrain angle</span>
       </div>
     )
   }
@@ -248,6 +267,7 @@ export default function OptionsBar() {
         <input type="range" min={1} max={100} value={opts.opacity} onChange={e => setToolOption('clone-stamp', 'opacity', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.opacity}%</span>
         <span style={{ ...labelStyle, opacity: 0.6 }}>Alt+click to set sample</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Alt+click: set sample point</span>
       </div>
     )
   }
@@ -262,6 +282,9 @@ export default function OptionsBar() {
         <span style={labelStyle}>Exposure</span>
         <input type="range" min={1} max={100} value={opts.exposure} onChange={e => setToolOption(activeTool, 'exposure', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.exposure}%</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>
+          {activeTool === 'dodge' ? 'Alt/Shift: switch to Burn' : 'Alt/Shift: switch to Dodge'}
+        </span>
       </div>
     )
   }
@@ -276,6 +299,7 @@ export default function OptionsBar() {
         <span style={labelStyle}>Strength</span>
         <input type="range" min={1} max={100} value={opts.strength} onChange={e => setToolOption('blur-brush', 'strength', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.strength}%</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Alt/Shift: Sharpen mode</span>
       </div>
     )
   }
@@ -289,6 +313,7 @@ export default function OptionsBar() {
         <span style={labelStyle}>Width</span>
         <input type="number" min={1} max={20} value={opts.strokeWidth} onChange={e => setToolOption('pen', 'strokeWidth', +e.target.value)} style={{ width: 48 }} />
         <span style={{ ...labelStyle, opacity: 0.6 }}>Click=point • Click first point to close • Enter=finish • Esc=cancel</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: snap 45° • Enter: finish • Esc: cancel</span>
       </div>
     )
   }
@@ -330,6 +355,7 @@ export default function OptionsBar() {
             style={{ width: '28px', height: '22px', padding: '1px', border: '1px solid var(--border)', borderRadius: '3px', cursor: 'pointer', background: 'none' }}
           />
         </div>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Alt: sample color • Shift+click: straight line</span>
       </div>
     )
   }
@@ -350,6 +376,7 @@ export default function OptionsBar() {
           />
           <span style={labelStyle}>{opts.size}</span>
         </div>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift+click: straight line</span>
       </div>
     )
   }
@@ -457,6 +484,7 @@ export default function OptionsBar() {
           />
         </div>
         <span style={{ ...labelStyle, marginLeft: 8, opacity: 0.6 }}>⇧ Shift = square</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: square • Alt: from center • Shift+Alt: square from center</span>
       </div>
     )
   }
@@ -512,6 +540,7 @@ export default function OptionsBar() {
           />
         </div>
         <span style={{ ...labelStyle, marginLeft: 8, opacity: 0.6 }}>⇧ Shift = circle</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: circle • Alt: from center • Shift+Alt: circle from center</span>
       </div>
     )
   }
@@ -534,6 +563,7 @@ export default function OptionsBar() {
         >
           +
         </button>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift/Alt: zoom out</span>
       </div>
     )
   }

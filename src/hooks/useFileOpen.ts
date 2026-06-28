@@ -34,18 +34,22 @@ export function useFileOpen() {
       fc.clear()
       try {
         // data: URIs do not require crossOrigin — omit to avoid unnecessary CORS implications
+        // Create the layer entry FIRST so we can use its UUID on the Fabric object
+        addLayer('Background')
+        const newLayers = useEditorStore.getState().layers
+        const bgLayerId = newLayers[newLayers.length - 1]?.id ?? 'background'
+
         const fabricImg = await FabricImage.fromURL(dataURL)
-        fabricImg.set({ left: 0, top: 0, selectable: false, evented: false, layerId: 'background' })
+        // Use the layer's UUID — not the hardcoded 'background' string — so
+        // layerBridge.syncLayers() can find this object and apply visibility/opacity
+        fabricImg.set({ left: 0, top: 0, selectable: false, evented: false, layerId: bgLayerId } as any)
         fc.add(fabricImg)
         fc.renderAll()
         setFileName(file.name)
         setImageSize({ w, h })
         setHasImage(true)
         setShowWelcome(false)
-        addLayer('Background')
-        const layers = useEditorStore.getState().layers
-        // Select the most recently added layer (last in array)
-        if (layers.length) setActiveLayer(layers[layers.length - 1].id)
+        setActiveLayer(bgLayerId)
         pushHistory('Open Image', fc.toJSON(['customId','layerId']))
       } catch (err) {
         console.error('Failed to load image onto canvas:', err)

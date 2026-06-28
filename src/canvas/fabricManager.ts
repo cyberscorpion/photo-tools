@@ -6,6 +6,14 @@ let _canvas = null
 /** @type {((eventName: string, data: any) => void)|null} */
 let _bridge = null
 
+/** Returns the activeLayerId from the store — set by CanvasStage on mount */
+let _getActiveLayerId: (() => string | null) | null = null
+
+/** Call this from CanvasStage to wire the active-layer getter */
+export function setLayerIdGetter(fn: () => string | null) {
+  _getActiveLayerId = fn
+}
+
 /**
  * Create and configure the Fabric.js canvas singleton.
  * @param {HTMLCanvasElement} canvasEl
@@ -26,11 +34,17 @@ export function initFabric(canvasEl, width, height) {
     selection: true,
   })
 
-  // Tag every new object with a unique customId if it doesn't already have one
+  // Tag every new object with a unique customId, and auto-assign activeLayerId
+  // if the object doesn't already have a layerId set before being added.
   fc.on('object:added', (e) => {
-    const obj = e.target
-    if (obj && !obj.customId) {
-      obj.customId = crypto.randomUUID()
+    const obj = e.target as any
+    if (!obj) return
+    if (!obj.customId) obj.customId = crypto.randomUUID()
+    // Don't override explicit system layerIds (contour, selection, crop-overlay)
+    const systemIds = ['contour', 'selection', 'crop-overlay']
+    if (!obj.layerId && _getActiveLayerId && !systemIds.includes(obj.layerId)) {
+      const layerId = _getActiveLayerId()
+      if (layerId) obj.layerId = layerId
     }
   })
 

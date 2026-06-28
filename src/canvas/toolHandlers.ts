@@ -125,8 +125,20 @@ function activateZoom(fc) {
     fc.defaultCursor = isZoomOut ? 'zoom-out' : 'zoom-in'
   }
 
+  // Update cursor immediately when Shift/Alt is pressed (before clicking)
+  const onKeyDown = (ev: KeyboardEvent) => {
+    if (ev.shiftKey || ev.altKey) fc.defaultCursor = 'zoom-out'
+  }
+  const onKeyUp = () => { fc.defaultCursor = 'zoom-in' }
+  document.addEventListener('keydown', onKeyDown)
+  document.addEventListener('keyup', onKeyUp)
+
   fc.on('mouse:down', onMouseDown)
-  return () => { offAll(fc, { 'mouse:down': onMouseDown }) }
+  return () => {
+    document.removeEventListener('keydown', onKeyDown)
+    document.removeEventListener('keyup', onKeyUp)
+    offAll(fc, { 'mouse:down': onMouseDown })
+  }
 }
 
 function activateBrush(fc, toolOptions) {
@@ -153,8 +165,79 @@ function activateBrush(fc, toolOptions) {
   }
   fc.freeDrawingBrush = brush
 
+  // ── Alt key = temporary eyedropper ──────────────────────────────────────────
+  let altMode = false
+
+  const onKeyDown = (ev: KeyboardEvent) => {
+    if (ev.altKey && !altMode && !ev.ctrlKey && !ev.metaKey) {
+      altMode = true
+      fc.isDrawingMode = false
+      fc.defaultCursor = 'crosshair'
+    }
+  }
+  const onKeyUp = (ev: KeyboardEvent) => {
+    if (!ev.altKey && altMode) {
+      altMode = false
+      fc.isDrawingMode = true
+      fc.defaultCursor = 'crosshair'
+    }
+  }
+  const onAltClick = (e: any) => {
+    if (!altMode) return
+    const p = getPointer(fc, e)
+    const ctx = (fc.getElement() as HTMLCanvasElement).getContext('2d')
+    if (!ctx) return
+    const d = ctx.getImageData(Math.max(0, Math.round(p.x)), Math.max(0, Math.round(p.y)), 1, 1).data
+    const hex = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')
+    useEditorStore.getState().setForegroundColor(hex)
+    // Immediately update brush colour
+    brush.color = hex
+    useEditorStore.getState().setToolOption('brush', 'color', hex)
+  }
+
+  // ── Shift + last-point = straight line ─────────────────────────────────────
+  let lastBrushEnd: { x: number; y: number } | null = null
+  fc.on('path:created', (e: any) => {
+    const coords = e.path?.path as [string, number, number][] | undefined
+    if (coords?.length) {
+      const last = coords[coords.length - 1]
+      if (last) lastBrushEnd = { x: last[1], y: last[2] }
+    }
+  })
+
+  const onBrushMouseDown = (e: any) => {
+    if (altMode) { onAltClick(e); return }
+    // Shift + click draws a straight line from last brush end point
+    if (e.e.shiftKey && lastBrushEnd) {
+      const p = getPointer(fc, e)
+      const linePath = new Path(
+        `M ${lastBrushEnd.x} ${lastBrushEnd.y} L ${p.x} ${p.y}`,
+        {
+          stroke: brush.color,
+          strokeWidth: brush.width,
+          fill: 'transparent',
+          globalCompositeOperation: 'source-over',
+        } as any
+      )
+      fc.add(linePath)
+      fc.renderAll()
+      useEditorStore.getState().pushHistory('Brush Straight', fc.toJSON(['customId', 'layerId']))
+      lastBrushEnd = { x: p.x, y: p.y }
+    }
+  }
+
+  document.addEventListener('keydown', onKeyDown)
+  document.addEventListener('keyup', onKeyUp)
+  fc.on('mouse:down', onBrushMouseDown)
+
   return () => {
     fc.isDrawingMode = false
+    altMode = false
+    lastBrushEnd = null
+    document.removeEventListener('keydown', onKeyDown)
+    document.removeEventListener('keyup', onKeyUp)
+    fc.off('mouse:down', onBrushMouseDown)
+    fc.off('path:created')
   }
 }
 
@@ -284,19 +367,25 @@ function activateRect(fc, toolOptions) {
     const point = getPointer(fc, e)
     const dx = point.x - shapeOrigin.x
     const dy = point.y - shapeOrigin.y
-    let x, y, w, h
-    if (e.e.shiftKey) {
-      // Shift → perfect square; preserve drag direction
+    let x: number, y: number, w: number, h: number
+
+    if (e.e.shiftKey && e.e.altKey) {
+      // Shift+Alt: constrained square from center
+      const size = Math.min(Math.abs(dx), Math.abs(dy))
+      x = shapeOrigin.x - size; y = shapeOrigin.y - size; w = size * 2; h = size * 2
+    } else if (e.e.altKey) {
+      // Alt: draw from center
+      w = Math.abs(dx) * 2; h = Math.abs(dy) * 2
+      x = shapeOrigin.x - Math.abs(dx); y = shapeOrigin.y - Math.abs(dy)
+    } else if (e.e.shiftKey) {
+      // Shift: constrain to square
       const size = Math.min(Math.abs(dx), Math.abs(dy))
       x = dx < 0 ? shapeOrigin.x - size : shapeOrigin.x
       y = dy < 0 ? shapeOrigin.y - size : shapeOrigin.y
-      w = size
-      h = size
+      w = size; h = size
     } else {
-      x = Math.min(point.x, shapeOrigin.x)
-      y = Math.min(point.y, shapeOrigin.y)
-      w = Math.abs(dx)
-      h = Math.abs(dy)
+      x = Math.min(point.x, shapeOrigin.x); y = Math.min(point.y, shapeOrigin.y)
+      w = Math.abs(dx); h = Math.abs(dy)
     }
     activeShape.set({ left: x, top: y, width: w, height: h })
     fc.renderAll()
@@ -378,17 +467,20 @@ function activateEllipse(fc, toolOptions) {
     const point = getPointer(fc, e)
     const dx = point.x - shapeOrigin.x
     const dy = point.y - shapeOrigin.y
-    let rx, ry, cx, cy
-    if (e.e.shiftKey) {
-      // Shift → perfect circle; preserve drag direction
-      const size = Math.min(Math.abs(dx), Math.abs(dy))
-      rx = size / 2
-      ry = size / 2
-      cx = (dx < 0 ? shapeOrigin.x - size : shapeOrigin.x) + rx
-      cy = (dy < 0 ? shapeOrigin.y - size : shapeOrigin.y) + ry
+    let rx: number, ry: number, cx: number, cy: number
+
+    if (e.e.shiftKey && e.e.altKey) {
+      const size = Math.min(Math.abs(dx), Math.abs(dy)) / 2
+      rx = size; ry = size; cx = shapeOrigin.x; cy = shapeOrigin.y
+    } else if (e.e.altKey) {
+      rx = Math.abs(dx); ry = Math.abs(dy); cx = shapeOrigin.x; cy = shapeOrigin.y
+    } else if (e.e.shiftKey) {
+      const size = Math.min(Math.abs(dx), Math.abs(dy)) / 2
+      rx = size; ry = size
+      cx = (dx < 0 ? shapeOrigin.x - size * 2 : shapeOrigin.x) + rx
+      cy = (dy < 0 ? shapeOrigin.y - size * 2 : shapeOrigin.y) + ry
     } else {
-      rx = Math.abs(dx) / 2
-      ry = Math.abs(dy) / 2
+      rx = Math.abs(dx) / 2; ry = Math.abs(dy) / 2
       cx = Math.min(point.x, shapeOrigin.x) + rx
       cy = Math.min(point.y, shapeOrigin.y) + ry
     }
@@ -485,12 +577,23 @@ function activateRoundedRect(fc: any, toolOptions: any) {
   const onMouseMove = (e: any) => {
     if (!drawing || !shape) return
     const p = getPointer(fc, e), dx = p.x - origin.x, dy = p.y - origin.y
-    const size = e.e.shiftKey ? Math.min(Math.abs(dx), Math.abs(dy)) : null
-    shape.set({
-      left: dx < 0 ? (size ? origin.x - size : p.x) : origin.x,
-      top:  dy < 0 ? (size ? origin.y - size : p.y) : origin.y,
-      width: size || Math.abs(dx), height: size || Math.abs(dy)
-    }); fc.renderAll()
+    let left: number, top: number, width: number, height: number
+
+    if (e.e.shiftKey && e.e.altKey) {
+      const size = Math.min(Math.abs(dx), Math.abs(dy))
+      left = origin.x - size; top = origin.y - size; width = size * 2; height = size * 2
+    } else if (e.e.altKey) {
+      width = Math.abs(dx) * 2; height = Math.abs(dy) * 2
+      left = origin.x - Math.abs(dx); top = origin.y - Math.abs(dy)
+    } else if (e.e.shiftKey) {
+      const size = Math.min(Math.abs(dx), Math.abs(dy))
+      left = dx < 0 ? origin.x - size : origin.x; top = dy < 0 ? origin.y - size : origin.y
+      width = size; height = size
+    } else {
+      left = dx < 0 ? p.x : origin.x; top = dy < 0 ? p.y : origin.y
+      width = Math.abs(dx); height = Math.abs(dy)
+    }
+    shape.set({ left, top, width, height }); fc.renderAll()
   }
   const onMouseUp = () => {
     if (!drawing || !shape) return; drawing = false
@@ -1115,13 +1218,24 @@ function makeToneBrush(toolId: string, brightnessFactor: (exposure: number) => n
     brush.color = 'rgba(0,0,0,0.01)'; brush.width = opts.size
     fc.freeDrawingBrush = brush
 
+    let altOnStroke = false
+    let shiftOnStroke = false
+    const onStrokeStart = (e: any) => {
+      altOnStroke = e.e.altKey
+      shiftOnStroke = e.e.shiftKey
+    }
+    fc.on('mouse:down', onStrokeStart)
+
     const onPathCreated = async (e: any) => {
       fc.remove(e.path)
       const ctx = getLowerCtx(); if (!ctx) return
       const path = e.path
       const coords = (path.path || []) as [string, number, number][]
       const r = Math.round(opts.size / 2)
-      const factor = brightnessFactor(opts.exposure)
+      // Alt inverts: dodge ↔ burn; Shift doubles strength
+      const strength = shiftOnStroke ? 2 : 1
+      let factor = brightnessFactor(opts.exposure * strength)
+      if (altOnStroke) factor = 1 / factor  // invert: >1 becomes <1 and vice-versa
       for (const [cmd, cx, cy] of coords) {
         if (cmd === 'M' || cmd === 'L') {
           const x = Math.max(0, Math.round(cx - r)), y = Math.max(0, Math.round(cy - r))
@@ -1139,7 +1253,7 @@ function makeToneBrush(toolId: string, brightnessFactor: (exposure: number) => n
     }
 
     fc.on('path:created', onPathCreated)
-    return () => { fc.isDrawingMode = false; fc.off('path:created', onPathCreated) }
+    return () => { fc.isDrawingMode = false; fc.off('mouse:down', onStrokeStart); fc.off('path:created', onPathCreated) }
   }
 }
 
@@ -1153,27 +1267,51 @@ function activateBlurBrush(fc: any, toolOptions: any) {
   brush.color = 'rgba(0,0,0,0.01)'; brush.width = opts.size
   fc.freeDrawingBrush = brush
 
+  let altOnStroke = false
+  let shiftOnStroke = false
+  const onStrokeStart = (e: any) => { altOnStroke = e.e.altKey; shiftOnStroke = e.e.shiftKey }
+  fc.on('mouse:down', onStrokeStart)
+
   const onPathCreated = async (e: any) => {
     fc.remove(e.path)
     const ctx = getLowerCtx(); if (!ctx) return
     const path = e.path
     const coords = (path.path || []) as [string, number, number][]
     const r = Math.round(opts.size / 2)
-    const passes = Math.max(1, Math.round((opts.strength / 100) * 3))
+    const sharpenMode = altOnStroke || shiftOnStroke
     for (const [cmd, cx, cy] of coords) {
       if (cmd === 'M' || cmd === 'L') {
         const x = Math.max(0, Math.round(cx - r)), y = Math.max(0, Math.round(cy - r))
         const imgData = ctx.getImageData(x, y, r*2, r*2)
-        boxBlur(imgData.data, r*2, r*2, passes)
+        if (sharpenMode) {
+          // Unsharp mask (sharpen)
+          const s = (opts.strength / 100) * 0.5
+          const orig = new Uint8ClampedArray(imgData.data)
+          const size = r * 2
+          for (let iy = 1; iy < size-1; iy++) {
+            for (let ix = 1; ix < size-1; ix++) {
+              for (let c = 0; c < 3; c++) {
+                const center = orig[(iy*size+ix)*4+c]
+                const sum = orig[((iy-1)*size+ix)*4+c] + orig[((iy+1)*size+ix)*4+c] +
+                            orig[(iy*size+ix-1)*4+c] + orig[(iy*size+ix+1)*4+c]
+                imgData.data[(iy*size+ix)*4+c] = Math.min(255, Math.max(0,
+                  center + s * (center * 4 - sum)
+                ))
+              }
+            }
+          }
+        } else {
+          boxBlur(imgData.data, r*2, r*2, Math.max(1, Math.round((opts.strength/100)*3)))
+        }
         ctx.putImageData(imgData, x, y)
       }
     }
     await reloadCanvasAsImage()
-    useEditorStore.getState().pushHistory('Blur Brush', fc.toJSON(['customId','layerId']))
+    useEditorStore.getState().pushHistory('Blur/Sharpen Brush', fc.toJSON(['customId','layerId']))
   }
 
   fc.on('path:created', onPathCreated)
-  return () => { fc.isDrawingMode = false; fc.off('path:created', onPathCreated) }
+  return () => { fc.isDrawingMode = false; fc.off('mouse:down', onStrokeStart); fc.off('path:created', onPathCreated) }
 }
 
 function activatePaintBucket(fc: any, toolOptions: any, storeActions: any) {

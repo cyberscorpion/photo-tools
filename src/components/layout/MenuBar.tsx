@@ -324,16 +324,21 @@ export default function MenuBar() {
         import('fabric').then(({ FabricImage }) => {
           FabricImage.fromURL(dataURL).then((fabricImg) => {
             // Centre the imported image on the canvas
+            // Create layer first so we can tag the Fabric object with its UUID
+            const layerName = file.name.replace(/\.[^.]+$/, '')
+            addLayer(layerName)
+            const importedLayerId = useEditorStore.getState().layers.slice(-1)[0]?.id
+
             fabricImg.set({
               left: (fc.width! - (fabricImg.width ?? 0)) / 2,
               top:  (fc.height! - (fabricImg.height ?? 0)) / 2,
               selectable: true,
               evented: true,
+              layerId: importedLayerId,
             } as any)
             fc.add(fabricImg)
             fc.setActiveObject(fabricImg)
             fc.renderAll()
-            addLayer(file.name.replace(/\.[^.]+$/, ''))
             pushHistory('Import Layer', fc.toJSON(['customId', 'layerId']))
           })
         })

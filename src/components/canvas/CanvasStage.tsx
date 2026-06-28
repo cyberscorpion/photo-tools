@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { useEditorStore } from '../../store/editorStore.js'
-import { initFabric, disposeFabric, setEventBridge, getFabric } from '../../canvas/fabricManager.js'
+import { initFabric, disposeFabric, setEventBridge, getFabric, setLayerIdGetter } from '../../canvas/fabricManager.js'
 import { activateTool, deactivateTool } from '../../canvas/toolHandlers.js'
 import ExportDialog from '../dialogs/ExportDialog.jsx'
 import { applyAdjustments } from '../../canvas/adjustmentEngine.js'
@@ -29,9 +29,12 @@ export default function CanvasStage() {
     if (!canvasRef.current) return
 
     initFabric(canvasRef.current, canvasW, canvasH)
+    // Wire the active-layer getter so fabricManager can auto-tag new objects
+    setLayerIdGetter(() => useEditorStore.getState().activeLayerId)
 
     return () => {
       deactivateTool(prevToolRef.current)
+      setLayerIdGetter(null as any)
       disposeFabric()
       setEventBridge(null)
     }

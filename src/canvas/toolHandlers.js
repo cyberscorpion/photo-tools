@@ -1,10 +1,15 @@
-import { IText, Rect, Ellipse, Path, PencilBrush } from 'fabric'
+import { IText, Rect, Ellipse, Path, PencilBrush, FabricImage } from 'fabric'
 import { getFabric } from './fabricManager.js'
+import { panContainer } from './viewportManager.js'
+import { useEditorStore } from '../store/editorStore.js'
 
 // ── Internal state ────────────────────────────────────────────────────────────
 
 /** Tool-specific disposer functions keyed by tool id. */
 const _disposers = {}
+
+let _cropConfirm = null
+let _cropCancel = null
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,8 +36,38 @@ function activateSelect(fc) {
   fc.isDrawingMode = false
   fc.selection = true
   fc.defaultCursor = 'default'
-  fc.forEachObject((o) => { o.selectable = true; o.evented = true })
-  return () => {}
+  fc.forEachObject((o) => {
+    if (o.layerId === 'background' || o.layerId === 'contour') {
+      o.selectable = false
+      o.evented = false
+    } else {
+      o.selectable = true
+      o.evented = true
+    }
+  })
+
+  // Alt+drag: duplicate the active object
+  let altDragOriginal = null
+
+  const onMouseDown = (e) => {
+    if (!e.e.altKey) return
+    const target = fc.getActiveObject()
+    if (!target || target.layerId === 'background' || target.layerId === 'contour') return
+    // Clone and place at same position; drag will move the clone
+    target.clone().then((cloned) => {
+      cloned.set({ left: target.left + 10, top: target.top + 10 })
+      fc.add(cloned)
+      fc.setActiveObject(cloned)
+      fc.renderAll()
+    })
+  }
+
+  fc.on('mouse:down', onMouseDown)
+
+  return () => {
+    altDragOriginal = null
+    fc.off('mouse:down', onMouseDown)
+  }
 }
 
 function activateHand(fc) {
@@ -42,26 +77,25 @@ function activateHand(fc) {
   fc.forEachObject((o) => { o.selectable = false; o.evented = false })
 
   let isPanning = false
-  let lastPanPoint = { x: 0, y: 0 }
+  let lastX = 0, lastY = 0
 
   const onMouseDown = (e) => {
     isPanning = true
-    lastPanPoint = { x: e.e.clientX, y: e.e.clientY }
+    lastX = e.e.clientX
+    lastY = e.e.clientY
     fc.defaultCursor = 'grabbing'
   }
 
   const onMouseMove = (e) => {
     if (!isPanning) return
-    const dx = e.e.clientX - lastPanPoint.x
-    const dy = e.e.clientY - lastPanPoint.y
-    lastPanPoint = { x: e.e.clientX, y: e.e.clientY }
-    fc.relativePan({ x: dx, y: dy })
+    const dx = lastX - e.e.clientX
+    const dy = lastY - e.e.clientY
+    lastX = e.e.clientX
+    lastY = e.e.clientY
+    panContainer(dx, dy)
   }
 
-  const onMouseUp = () => {
-    isPanning = false
-    fc.defaultCursor = 'grab'
-  }
+  const onMouseUp = () => { isPanning = false; fc.defaultCursor = 'grab' }
 
   fc.on('mouse:down', onMouseDown)
   fc.on('mouse:move', onMouseMove)
@@ -69,11 +103,7 @@ function activateHand(fc) {
 
   return () => {
     isPanning = false
-    offAll(fc, {
-      'mouse:down': onMouseDown,
-      'mouse:move': onMouseMove,
-      'mouse:up': onMouseUp,
-    })
+    offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:up': onMouseUp })
   }
 }
 
@@ -84,18 +114,16 @@ function activateZoom(fc) {
   fc.forEachObject((o) => { o.selectable = false; o.evented = false })
 
   const onMouseDown = (e) => {
-    const point = getPointer(fc, e)
-    const delta = e.e.shiftKey ? -0.25 : 0.25
-    const newZoom = Math.max(0.1, Math.min(20, fc.getZoom() + delta))
-    fc.zoomToPoint({ x: point.x, y: point.y }, newZoom)
-    fc.defaultCursor = e.e.shiftKey ? 'zoom-out' : 'zoom-in'
+    const isZoomOut = e.e.shiftKey || e.e.altKey
+    const factor = isZoomOut ? 0.8 : 1.25
+    const currentZoom = useEditorStore.getState().zoom
+    const newZoom = Math.max(0.05, Math.min(16, parseFloat((currentZoom * factor).toFixed(3))))
+    useEditorStore.getState().setZoom(newZoom)
+    fc.defaultCursor = isZoomOut ? 'zoom-out' : 'zoom-in'
   }
 
   fc.on('mouse:down', onMouseDown)
-
-  return () => {
-    offAll(fc, { 'mouse:down': onMouseDown })
-  }
+  return () => { offAll(fc, { 'mouse:down': onMouseDown }) }
 }
 
 function activateBrush(fc, toolOptions) {
@@ -142,17 +170,17 @@ function activateEraser(fc, toolOptions) {
   // Use a fully-opaque black; destination-out ignores colour — only alpha matters
   brush.color = 'rgba(0,0,0,1)'
   // Apply the composite operation so strokes erase pixels rather than paint
-  const origBeforePathCreated = fc.__eventListeners?.['before:path:created']
-  fc.on('before:path:created', (e) => {
+  const beforePathCreatedHandler = (e) => {
     if (e.path) {
       e.path.globalCompositeOperation = 'destination-out'
     }
-  })
+  }
+  fc.on('before:path:created', beforePathCreatedHandler)
   fc.freeDrawingBrush = brush
 
   return () => {
     fc.isDrawingMode = false
-    fc.off('before:path:created')
+    fc.off('before:path:created', beforePathCreatedHandler)
   }
 }
 
@@ -164,8 +192,18 @@ function activateText(fc, toolOptions) {
   const opts = toolOptions.text ?? {}
 
   const onMouseDown = (e) => {
-    // Avoid creating text when clicking on an existing object
-    if (fc.findTarget(e.e)) return
+    const target = fc.findTarget(e.e)
+
+    // If the clicked target is an existing IText, enter edit mode on it
+    if (target instanceof IText) {
+      fc.setActiveObject(target)
+      target.enterEditing()
+      fc.renderAll()
+      return
+    }
+
+    // Avoid creating text when clicking on any other existing object
+    if (target) return
 
     const point = getPointer(fc, e)
     const text = new IText('', {
@@ -199,6 +237,14 @@ function activateRect(fc, toolOptions) {
 
   const opts = toolOptions.rect ?? {}
 
+  // Lock existing objects so the background image doesn't intercept drawing events
+  fc.forEachObject((o) => {
+    o._rectSavedSel = o.selectable
+    o._rectSavedEvt = o.evented
+    o.selectable = false
+    o.evented = false
+  })
+
   let drawingShape = false
   let shapeOrigin = { x: 0, y: 0 }
   let activeShape = null
@@ -226,10 +272,22 @@ function activateRect(fc, toolOptions) {
   const onMouseMove = (e) => {
     if (!drawingShape || !activeShape) return
     const point = getPointer(fc, e)
-    const x = Math.min(point.x, shapeOrigin.x)
-    const y = Math.min(point.y, shapeOrigin.y)
-    const w = Math.abs(point.x - shapeOrigin.x)
-    const h = Math.abs(point.y - shapeOrigin.y)
+    const dx = point.x - shapeOrigin.x
+    const dy = point.y - shapeOrigin.y
+    let x, y, w, h
+    if (e.e.shiftKey) {
+      // Shift → perfect square; preserve drag direction
+      const size = Math.min(Math.abs(dx), Math.abs(dy))
+      x = dx < 0 ? shapeOrigin.x - size : shapeOrigin.x
+      y = dy < 0 ? shapeOrigin.y - size : shapeOrigin.y
+      w = size
+      h = size
+    } else {
+      x = Math.min(point.x, shapeOrigin.x)
+      y = Math.min(point.y, shapeOrigin.y)
+      w = Math.abs(dx)
+      h = Math.abs(dy)
+    }
     activeShape.set({ left: x, top: y, width: w, height: h })
     fc.renderAll()
   }
@@ -252,6 +310,11 @@ function activateRect(fc, toolOptions) {
     drawingShape = false
     activeShape = null
     fc.defaultCursor = 'default'
+    // Restore object interactivity
+    fc.forEachObject((o) => {
+      if ('_rectSavedSel' in o) { o.selectable = o._rectSavedSel; delete o._rectSavedSel }
+      if ('_rectSavedEvt' in o) { o.evented = o._rectSavedEvt; delete o._rectSavedEvt }
+    })
     offAll(fc, {
       'mouse:down': onMouseDown,
       'mouse:move': onMouseMove,
@@ -266,6 +329,14 @@ function activateEllipse(fc, toolOptions) {
   fc.defaultCursor = 'crosshair'
 
   const opts = toolOptions.ellipse ?? {}
+
+  // Lock existing objects so the background image doesn't intercept drawing events
+  fc.forEachObject((o) => {
+    o._ellSavedSel = o.selectable
+    o._ellSavedEvt = o.evented
+    o.selectable = false
+    o.evented = false
+  })
 
   let drawingShape = false
   let shapeOrigin = { x: 0, y: 0 }
@@ -294,10 +365,22 @@ function activateEllipse(fc, toolOptions) {
   const onMouseMove = (e) => {
     if (!drawingShape || !activeShape) return
     const point = getPointer(fc, e)
-    const rx = Math.abs(point.x - shapeOrigin.x) / 2
-    const ry = Math.abs(point.y - shapeOrigin.y) / 2
-    const cx = Math.min(point.x, shapeOrigin.x) + rx
-    const cy = Math.min(point.y, shapeOrigin.y) + ry
+    const dx = point.x - shapeOrigin.x
+    const dy = point.y - shapeOrigin.y
+    let rx, ry, cx, cy
+    if (e.e.shiftKey) {
+      // Shift → perfect circle; preserve drag direction
+      const size = Math.min(Math.abs(dx), Math.abs(dy))
+      rx = size / 2
+      ry = size / 2
+      cx = (dx < 0 ? shapeOrigin.x - size : shapeOrigin.x) + rx
+      cy = (dy < 0 ? shapeOrigin.y - size : shapeOrigin.y) + ry
+    } else {
+      rx = Math.abs(dx) / 2
+      ry = Math.abs(dy) / 2
+      cx = Math.min(point.x, shapeOrigin.x) + rx
+      cy = Math.min(point.y, shapeOrigin.y) + ry
+    }
     activeShape.set({ left: cx - rx, top: cy - ry, rx, ry })
     fc.renderAll()
   }
@@ -320,6 +403,11 @@ function activateEllipse(fc, toolOptions) {
     drawingShape = false
     activeShape = null
     fc.defaultCursor = 'default'
+    // Restore object interactivity
+    fc.forEachObject((o) => {
+      if ('_ellSavedSel' in o) { o.selectable = o._ellSavedSel; delete o._ellSavedSel }
+      if ('_ellSavedEvt' in o) { o.evented = o._ellSavedEvt; delete o._ellSavedEvt }
+    })
     offAll(fc, {
       'mouse:down': onMouseDown,
       'mouse:move': onMouseMove,
@@ -333,33 +421,29 @@ function activateCrop(fc) {
   fc.selection = false
   fc.defaultCursor = 'crosshair'
 
+  // Lock all existing objects so dragging crop box doesn't move the image
+  fc.forEachObject((o) => {
+    o._savedSelectable = o.selectable
+    o._savedEvented = o.evented
+    o.selectable = false
+    o.evented = false
+  })
+
   let cropRect = null
   let cropDrawing = false
   let cropOrigin = { x: 0, y: 0 }
-  let cropOverlay = null
-  // AbortController to clean up button listeners on deactivation
-  let abortController = new AbortController()
 
   const onMouseDown = (e) => {
+    // Only start drawing on empty canvas area
     cropDrawing = true
     const point = getPointer(fc, e)
     cropOrigin = point
-
-    if (cropRect) {
-      fc.remove(cropRect)
-    }
-
+    if (cropRect) fc.remove(cropRect)
     cropRect = new Rect({
-      left: point.x,
-      top: point.y,
-      width: 0,
-      height: 0,
-      fill: 'rgba(0,0,0,0.2)',
-      stroke: '#ffffff',
-      strokeWidth: 1,
-      strokeDashArray: [5, 5],
-      selectable: false,
-      evented: false,
+      left: point.x, top: point.y, width: 0, height: 0,
+      fill: 'rgba(0,0,0,0.3)',
+      stroke: '#ffffff', strokeWidth: 1, strokeDashArray: [6, 3],
+      selectable: false, evented: false,
     })
     fc.add(cropRect)
   }
@@ -367,77 +451,85 @@ function activateCrop(fc) {
   const onMouseMove = (e) => {
     if (!cropDrawing || !cropRect) return
     const point = getPointer(fc, e)
-    const x = Math.min(point.x, cropOrigin.x)
-    const y = Math.min(point.y, cropOrigin.y)
-    const w = Math.abs(point.x - cropOrigin.x)
-    const h = Math.abs(point.y - cropOrigin.y)
-    cropRect.set({ left: x, top: y, width: w, height: h })
+    cropRect.set({
+      left: Math.min(point.x, cropOrigin.x),
+      top: Math.min(point.y, cropOrigin.y),
+      width: Math.abs(point.x - cropOrigin.x),
+      height: Math.abs(point.y - cropOrigin.y),
+    })
     fc.renderAll()
   }
 
   const onMouseUp = () => {
-    if (!cropDrawing) return
     cropDrawing = false
-    if (!cropRect || cropRect.width < 2 || cropRect.height < 2) return
-
-    // Abort any previous button listeners before creating a new overlay
-    abortController.abort()
-    abortController = new AbortController()
-
-    // Show confirm / cancel buttons as DOM overlay positioned over the canvas
-    const canvasEl = fc.getElement()
-    const container = canvasEl.parentElement ?? document.body
-
-    const overlay = document.createElement('div')
-    overlay.style.cssText =
-      'position:absolute;bottom:8px;left:50%;transform:translateX(-50%);' +
-      'display:flex;gap:8px;z-index:9999;pointer-events:all;'
-
-    const confirmBtn = document.createElement('button')
-    confirmBtn.textContent = 'Crop'
-    confirmBtn.style.cssText =
-      'padding:6px 16px;background:#3b82f6;color:#fff;border:none;border-radius:4px;cursor:pointer;'
-
-    const cancelBtn = document.createElement('button')
-    cancelBtn.textContent = 'Cancel'
-    cancelBtn.style.cssText =
-      'padding:6px 16px;background:#6b7280;color:#fff;border:none;border-radius:4px;cursor:pointer;'
-
-    overlay.appendChild(confirmBtn)
-    overlay.appendChild(cancelBtn)
-    container.style.position = 'relative'
-    container.appendChild(overlay)
-    cropOverlay = overlay
-
-    confirmBtn.addEventListener('click', () => {
-      if (cropRect) {
-        // Apply crop using clipPath
-        const cropClone = new Rect({
-          left: cropRect.left,
-          top: cropRect.top,
-          width: cropRect.width,
-          height: cropRect.height,
-          absolutePositioned: true,
-        })
-        fc.clipPath = cropClone
-        fc.remove(cropRect)
-        cropRect = null
-        fc.renderAll()
-      }
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay)
-      cropOverlay = null
-    }, { signal: abortController.signal })
-
-    cancelBtn.addEventListener('click', () => {
-      if (cropRect) {
-        fc.remove(cropRect)
-        cropRect = null
-        fc.renderAll()
-      }
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay)
-      cropOverlay = null
-    }, { signal: abortController.signal })
+    if (!cropRect || cropRect.width < 4 || cropRect.height < 4) return
+    // Signal store that crop mode is active (OptionsBar shows Done/Cancel)
+    useEditorStore.getState().setCropMode(true)
   }
+
+  const restoreObjects = () => {
+    fc.forEachObject((o) => {
+      if ('_savedSelectable' in o) { o.selectable = o._savedSelectable; delete o._savedSelectable }
+      if ('_savedEvented' in o) { o.evented = o._savedEvented; delete o._savedEvented }
+    })
+  }
+
+  const doCancel = () => {
+    if (cropRect) { fc.remove(cropRect); cropRect = null }
+    fc.renderAll()
+    restoreObjects()
+    useEditorStore.getState().setCropMode(false)
+    _cropConfirm = null
+    _cropCancel = null
+  }
+
+  const doConfirm = async () => {
+    if (!cropRect || cropRect.width < 4 || cropRect.height < 4) { doCancel(); return }
+
+    // Use cropRect's own properties — getBoundingRect has unreliable signatures across Fabric versions
+    const x = Math.max(0, Math.round(cropRect.left))
+    const y = Math.max(0, Math.round(cropRect.top))
+    const w = Math.min(fc.width - x, Math.round(cropRect.width))
+    const h = Math.min(fc.height - y, Math.round(cropRect.height))
+
+    if (w < 2 || h < 2) { doCancel(); return }
+
+    // Remove overlay, render clean canvas, then capture via offscreen canvas
+    fc.remove(cropRect)
+    cropRect = null
+    fc.renderAll()
+
+    // Draw from the Fabric lower-canvas element — more reliable than fc.toDataURL with crop params
+    const srcEl = fc.getElement()
+    const offscreen = document.createElement('canvas')
+    offscreen.width = w
+    offscreen.height = h
+    offscreen.getContext('2d').drawImage(srcEl, x, y, w, h, 0, 0, w, h)
+    const croppedDataURL = offscreen.toDataURL('image/png')
+
+    // Rebuild canvas at crop dimensions
+    fc.clear()
+    fc.setWidth(w)
+    fc.setHeight(h)
+
+    const img = await FabricImage.fromURL(croppedDataURL)
+    img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: 'background' })
+    fc.add(img)
+    fc.renderAll()
+
+    restoreObjects()
+
+    const st = useEditorStore.getState()
+    st.setImageSize({ w, h })
+    st.setHasImage(true)
+    st.setCropMode(false)
+    st.pushHistory('Crop', fc.toJSON(['customId', 'layerId']))
+    _cropConfirm = null
+    _cropCancel = null
+  }
+
+  _cropConfirm = doConfirm
+  _cropCancel = doCancel
 
   fc.on('mouse:down', onMouseDown)
   fc.on('mouse:move', onMouseMove)
@@ -445,22 +537,8 @@ function activateCrop(fc) {
 
   return () => {
     cropDrawing = false
-    // Abort button listeners to prevent stale callbacks
-    abortController.abort()
-    if (cropRect) {
-      fc.remove(cropRect)
-      cropRect = null
-    }
-    if (cropOverlay && cropOverlay.parentNode) {
-      cropOverlay.parentNode.removeChild(cropOverlay)
-      cropOverlay = null
-    }
-    fc.defaultCursor = 'default'
-    offAll(fc, {
-      'mouse:down': onMouseDown,
-      'mouse:move': onMouseMove,
-      'mouse:up': onMouseUp,
-    })
+    doCancel()
+    offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:up': onMouseUp })
   }
 }
 
@@ -596,6 +674,9 @@ function activateLasso(fc) {
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
+
+export function confirmCrop() { _cropConfirm?.() }
+export function cancelCrop() { _cropCancel?.() }
 
 /**
  * Activate a tool, cleaning up any previously active tool first.

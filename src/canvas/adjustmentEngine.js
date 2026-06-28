@@ -42,9 +42,9 @@ export function applyAdjustments(imgObject, adjustments, activeFilters) {
     warmth = 0,
     blur = 0,
     sharpness = 0,
-    // TODO: tint — apply as a green-channel ColorMatrix shift
-    // TODO: shadows — apply via a Curves/ColorMatrix filter on dark tones
-    // TODO: highlights — apply via a Curves/ColorMatrix filter on bright tones
+    tint = 0,
+    shadows = 0,
+    highlights = 0,
   } = adjustments
 
   // ── Per-slider filters ───────────────────────────────────────────────────────
@@ -93,6 +93,33 @@ export function applyAdjustments(imgObject, adjustments, activeFilters) {
 
   if (warmth !== 0) {
     filterList.push(makeWarmthFilter(warmth))
+  }
+
+  // Tint: negative = green shift, positive = magenta shift (reduce green channel)
+  if (tint !== 0) {
+    const t = tint / 300
+    // prettier-ignore
+    filterList.push(new filters.ColorMatrix({
+      matrix: [
+        1, 0, 0, 0, 0,
+        0, 1 - t, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, 1, 0,
+      ],
+    }))
+  }
+
+  // Shadows: non-linear gamma that boosts/darkens shadow tones
+  // Use a power-curve via Gamma: shadows +100 lifts darks, -100 crushes them
+  if (shadows !== 0) {
+    const gamma = Math.pow(2, -shadows / 200)
+    filterList.push(new filters.Gamma({ gamma: [gamma, gamma, gamma] }))
+  }
+
+  // Highlights: similar but targets bright tones via inverted curve
+  if (highlights !== 0) {
+    const gamma = Math.pow(2, highlights / 300)
+    filterList.push(new filters.Gamma({ gamma: [gamma, gamma, gamma] }))
   }
 
   // ── Preset / named filters ───────────────────────────────────────────────────

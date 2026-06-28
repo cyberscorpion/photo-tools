@@ -72,6 +72,7 @@ export const useEditorStore = create((set, get) => ({
 
   // ── Welcome screen ──────────────────────────────────────────────────────────
   showWelcome: true,
+  cropMode: false,
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
@@ -210,7 +211,8 @@ export const useEditorStore = create((set, get) => ({
     set((s) => {
       // Discard any "forward" history beyond current index
       const truncated = s.history.slice(0, s.historyIndex + 1)
-      const entry = { label, fabricJSON, timestamp: Date.now() }
+      const { imageSize: _sz } = get()
+      const entry = { label, fabricJSON, timestamp: Date.now(), canvasW: _sz.w, canvasH: _sz.h }
       const next = [...truncated, entry]
 
       // Ring buffer: keep at most MAX_HISTORY entries
@@ -230,6 +232,11 @@ export const useEditorStore = create((set, get) => ({
     const newIndex = historyIndex - 1
     set({ historyIndex: newIndex })
     const entry = history[newIndex]
+    if (entry?.canvasW && entry?.canvasH) {
+      const _fc = getFabric()
+      if (_fc) { _fc.setWidth(entry.canvasW); _fc.setHeight(entry.canvasH) }
+      set({ imageSize: { w: entry.canvasW, h: entry.canvasH } })
+    }
     // Restore canvas state from the history entry
     if (entry?.fabricJSON) {
       const fc = getFabric()
@@ -246,6 +253,11 @@ export const useEditorStore = create((set, get) => ({
     const newIndex = historyIndex + 1
     set({ historyIndex: newIndex })
     const entry = history[newIndex]
+    if (entry?.canvasW && entry?.canvasH) {
+      const _fc = getFabric()
+      if (_fc) { _fc.setWidth(entry.canvasW); _fc.setHeight(entry.canvasH) }
+      set({ imageSize: { w: entry.canvasW, h: entry.canvasH } })
+    }
     // Restore canvas state from the history entry
     if (entry?.fabricJSON) {
       const fc = getFabric()
@@ -261,6 +273,11 @@ export const useEditorStore = create((set, get) => ({
     if (idx < 0 || idx >= history.length) return null
     set({ historyIndex: idx })
     const entry = history[idx]
+    if (entry?.canvasW && entry?.canvasH) {
+      const _fc = getFabric()
+      if (_fc) { _fc.setWidth(entry.canvasW); _fc.setHeight(entry.canvasH) }
+      set({ imageSize: { w: entry.canvasW, h: entry.canvasH } })
+    }
     // Restore canvas state from the history entry
     if (entry?.fabricJSON) {
       const fc = getFabric()
@@ -286,4 +303,6 @@ export const useEditorStore = create((set, get) => ({
       fileName: file?.name ?? null,
       hasImage: true,
     }),
+
+  setCropMode: (bool) => set({ cropMode: bool }),
 }))

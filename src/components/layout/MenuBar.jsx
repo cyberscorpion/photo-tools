@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useEditorStore } from '../../store/editorStore.js'
 import ExportDialog from '../dialogs/ExportDialog.jsx'
+import ResizeDialog from '../dialogs/ResizeDialog.jsx'
 import { getFabric } from '../../canvas/fabricManager.js'
 import { copyToClipboard } from '../../canvas/exportEngine.js'
 
@@ -142,6 +143,7 @@ function MenuDropdown({ label, items, openMenu, setOpenMenu }) {
 export default function MenuBar() {
   const [openMenu, setOpenMenu] = useState(null)
   const [showExport, setShowExport] = useState(false)
+  const [showResize, setShowResize] = React.useState(false)
   const fileInputRef = useRef(null)
 
   const undo = useEditorStore((s) => s.undo)
@@ -153,6 +155,7 @@ export default function MenuBar() {
   const openFile = useEditorStore((s) => s.openFile)
   const setFileName = useEditorStore((s) => s.setFileName)
   const setImageSize = useEditorStore((s) => s.setImageSize)
+  const pushHistory = useEditorStore((s) => s.pushHistory)
 
   const handleOpenImage = useCallback(() => {
     fileInputRef.current && fileInputRef.current.click()
@@ -239,45 +242,54 @@ export default function MenuBar() {
     fc.renderAll()
   }, [])
 
-  const handleFlipHorizontal = useCallback(() => {
+  const applyCanvasTransform = useCallback(async (transformFn, label) => {
     const fc = getFabric()
-    if (!fc) return
-    const obj = fc.getActiveObject()
-    if (obj) {
-      obj.set('flipX', !obj.flipX)
-      fc.renderAll()
+    if (!fc || fc.width === 0) return
+    const w = fc.width, h = fc.height
+    const srcDataURL = fc.toDataURL({ format: 'png', multiplier: 1 })
+    const img = new Image()
+    img.onload = async () => {
+      const [nw, nh] = label.includes('Rotate') ? [h, w] : [w, h]
+      const off = document.createElement('canvas')
+      off.width = nw; off.height = nh
+      const ctx = off.getContext('2d')
+      transformFn(ctx, img, w, h, nw, nh)
+      const dataURL = off.toDataURL('image/png')
+      fc.clear()
+      fc.setWidth(nw); fc.setHeight(nh)
+      setImageSize({ w: nw, h: nh })
+      const { FabricImage } = await import('fabric')
+      const fImg = await FabricImage.fromURL(dataURL)
+      fImg.set({ left: 0, top: 0, selectable: false, evented: false, layerId: 'background' })
+      fc.add(fImg); fc.renderAll()
+      pushHistory(label, fc.toJSON(['customId', 'layerId']))
     }
-  }, [])
+    img.src = srcDataURL
+  }, [setImageSize, pushHistory])
+
+  const handleFlipHorizontal = useCallback(() => {
+    applyCanvasTransform((ctx, img, w, h) => {
+      ctx.save(); ctx.scale(-1, 1); ctx.drawImage(img, -w, 0); ctx.restore()
+    }, 'Flip Horizontal')
+  }, [applyCanvasTransform])
 
   const handleFlipVertical = useCallback(() => {
-    const fc = getFabric()
-    if (!fc) return
-    const obj = fc.getActiveObject()
-    if (obj) {
-      obj.set('flipY', !obj.flipY)
-      fc.renderAll()
-    }
-  }, [])
+    applyCanvasTransform((ctx, img, w, h) => {
+      ctx.save(); ctx.scale(1, -1); ctx.drawImage(img, 0, -h); ctx.restore()
+    }, 'Flip Vertical')
+  }, [applyCanvasTransform])
 
   const handleRotateCW = useCallback(() => {
-    const fc = getFabric()
-    if (!fc) return
-    const obj = fc.getActiveObject()
-    if (obj) {
-      obj.rotate((obj.angle || 0) + 90)
-      fc.renderAll()
-    }
-  }, [])
+    applyCanvasTransform((ctx, img, w, h, nw, nh) => {
+      ctx.translate(nw, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(img, 0, 0)
+    }, 'Rotate 90° CW')
+  }, [applyCanvasTransform])
 
   const handleRotateCCW = useCallback(() => {
-    const fc = getFabric()
-    if (!fc) return
-    const obj = fc.getActiveObject()
-    if (obj) {
-      obj.rotate((obj.angle || 0) - 90)
-      fc.renderAll()
-    }
-  }, [])
+    applyCanvasTransform((ctx, img, w, h, nw, nh) => {
+      ctx.translate(0, nh); ctx.rotate(-Math.PI / 2); ctx.drawImage(img, 0, 0)
+    }, 'Rotate 90° CCW')
+  }, [applyCanvasTransform])
 
   const applyZoom = useCallback((newZoom) => {
     setZoom(newZoom)
@@ -322,7 +334,7 @@ export default function MenuBar() {
         { label: 'Rotate 90° CW', action: handleRotateCW },
         { label: 'Rotate 90° CCW', action: handleRotateCCW },
         { label: '──' },
-        { label: 'Resize Canvas...', disabled: true },
+        { label: 'Resize Canvas...', action: () => setShowResize(true) },
       ],
     },
     {
@@ -362,6 +374,18 @@ export default function MenuBar() {
             setOpenMenu={setOpenMenu}
           />
         ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingRight: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{Math.round(zoom * 100)}%</span>
+          <button
+            onClick={() => setShowExport(true)}
+            style={{
+              padding: '3px 10px', fontSize: 11, borderRadius: 3,
+              background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 500,
+            }}
+          >
+            Export
+          </button>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -373,6 +397,7 @@ export default function MenuBar() {
       {showExport && (
         <ExportDialog isOpen={showExport} onClose={() => setShowExport(false)} />
       )}
+      {showResize && <ResizeDialog isOpen={showResize} onClose={() => setShowResize(false)} />}
     </>
   )
 }

@@ -1,7 +1,8 @@
-import React, { useRef, useCallback } from 'react'
+import React, { useRef, useEffect, useCallback } from 'react'
 import { useEditorStore } from '../../store/editorStore.js'
 import CheckerBackground from '../canvas/CheckerBackground.jsx'
 import CanvasStage from '../canvas/CanvasStage.jsx'
+import { setWorkspaceContainer } from '../../canvas/viewportManager.js'
 
 export default function WorkspaceArea({ onCursorMove }) {
   const imageSize = useEditorStore((s) => s.imageSize)
@@ -12,6 +13,30 @@ export default function WorkspaceArea({ onCursorMove }) {
   const canvasH = imageSize.h || 600
 
   const containerRef = useRef(null)
+
+  // Register container for hand-tool pan
+  useEffect(() => {
+    setWorkspaceContainer(containerRef.current)
+    return () => setWorkspaceContainer(null)
+  }, [])
+
+  // Native wheel listener — React onWheel is passive and cannot call preventDefault
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handler = (e) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      e.stopPropagation()
+      const factor = e.deltaY > 0 ? 0.9 : 1.1
+      // Read zoom directly — setZoom doesn't support functional updates (it's a plain setter)
+      const cur = useEditorStore.getState().zoom
+      const next = Math.max(0.05, Math.min(16, parseFloat((cur * factor).toFixed(3))))
+      setZoom(next)
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [setZoom])
 
   const handleMouseMove = useCallback(
     (e) => {
@@ -24,20 +49,10 @@ export default function WorkspaceArea({ onCursorMove }) {
     [onCursorMove, zoom]
   )
 
-  const handleWheel = useCallback(
-    (e) => {
-      if (!e.ctrlKey) return
-      e.preventDefault()
-      const delta = e.deltaY > 0 ? -0.1 : 0.1
-      const next = Math.max(0.1, Math.min(10, zoom + delta))
-      setZoom(parseFloat(next.toFixed(2)))
-    },
-    [zoom, setZoom]
-  )
-
   return (
     <div
       ref={containerRef}
+      onMouseMove={handleMouseMove}
       style={{
         overflow: 'auto',
         background: 'var(--bg-deep)',
@@ -47,19 +62,31 @@ export default function WorkspaceArea({ onCursorMove }) {
         position: 'relative',
         gridArea: 'workspace',
       }}
-      onMouseMove={handleMouseMove}
-      onWheel={handleWheel}
     >
+      {/* Phantom div sized to the zoomed canvas — gives the scrollbar its range */}
       <div
         style={{
+          width: canvasW * zoom,
+          height: canvasH * zoom,
           position: 'relative',
-          width: canvasW,
-          height: canvasH,
           flexShrink: 0,
         }}
       >
-        <CheckerBackground width={canvasW} height={canvasH} />
-        <CanvasStage />
+        {/* Actual canvas wrapper: CSS-scaled for visual zoom */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: canvasW,
+            height: canvasH,
+            transform: `scale(${zoom})`,
+            transformOrigin: '0 0',
+          }}
+        >
+          <CheckerBackground width={canvasW} height={canvasH} />
+          <CanvasStage />
+        </div>
       </div>
     </div>
   )

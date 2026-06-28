@@ -32,7 +32,8 @@ export default function WelcomeOverlay({ onFileSelected }) {
   const overlayStyle = {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0,0,0,0.85)',
+    background: 'rgba(10,12,18,0.72)',
+    backdropFilter: 'blur(2px)',
     zIndex: 500,
     display: 'flex',
     alignItems: 'center',

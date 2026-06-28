@@ -1,5 +1,7 @@
 import React from 'react'
 import { useEditorStore } from '../../store/editorStore.js'
+import { confirmCrop, cancelCrop } from '../../canvas/toolHandlers.js'
+import { getFabric } from '../../canvas/fabricManager.js'
 
 const barStyle = {
   height: 'var(--optionsbar-h)',
@@ -42,6 +44,33 @@ export default function OptionsBar() {
   const zoom = useEditorStore((s) => s.zoom)
   const setZoom = useEditorStore((s) => s.setZoom)
   const selection = useEditorStore((s) => s.selection)
+  const cropMode = useEditorStore((s) => s.cropMode)
+
+  if (cropMode || activeTool === 'crop') {
+    return (
+      <div style={barStyle}>
+        <span style={{ ...labelStyle, marginRight: 8 }}>Crop: Draw selection, then confirm</span>
+        <button
+          onClick={confirmCrop}
+          style={{
+            padding: '3px 14px', borderRadius: 3, fontSize: 11, fontWeight: 600,
+            background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)', cursor: 'pointer',
+          }}
+        >
+          ✓ Apply Crop
+        </button>
+        <button
+          onClick={cancelCrop}
+          style={{
+            padding: '3px 14px', borderRadius: 3, fontSize: 11,
+            background: 'var(--bg-hover)', color: 'var(--text)', border: '1px solid var(--border)', cursor: 'pointer',
+          }}
+        >
+          ✕ Cancel
+        </button>
+      </div>
+    )
+  }
 
   if (activeTool === 'brush') {
     const opts = toolOptions.brush
@@ -158,6 +187,14 @@ export default function OptionsBar() {
 
   if (activeTool === 'rect') {
     const opts = toolOptions.rect
+
+    const updateActiveShape = (props) => {
+      const fc = getFabric()
+      if (!fc) return
+      const obj = fc.getActiveObject()
+      if (obj) { obj.set(props); fc.renderAll() }
+    }
+
     return (
       <div style={barStyle}>
         <div style={sliderWrapStyle}>
@@ -165,7 +202,10 @@ export default function OptionsBar() {
           <input
             type="color"
             value={opts.fill}
-            onChange={(e) => setToolOption('rect', 'fill', e.target.value)}
+            onChange={(e) => {
+              setToolOption('rect', 'fill', e.target.value)
+              updateActiveShape({ fill: e.target.value })
+            }}
             style={{ width: '28px', height: '22px', padding: '1px', border: '1px solid var(--border)', borderRadius: '3px', cursor: 'pointer', background: 'none' }}
           />
         </div>
@@ -174,7 +214,10 @@ export default function OptionsBar() {
           <input
             type="color"
             value={opts.stroke === 'transparent' ? '#000000' : opts.stroke}
-            onChange={(e) => setToolOption('rect', 'stroke', e.target.value)}
+            onChange={(e) => {
+              setToolOption('rect', 'stroke', e.target.value)
+              updateActiveShape({ stroke: e.target.value })
+            }}
             style={{ width: '28px', height: '22px', padding: '1px', border: '1px solid var(--border)', borderRadius: '3px', cursor: 'pointer', background: 'none' }}
           />
         </div>
@@ -185,16 +228,28 @@ export default function OptionsBar() {
             min={0}
             max={20}
             value={opts.strokeWidth}
-            onChange={(e) => setToolOption('rect', 'strokeWidth', Number(e.target.value))}
+            onChange={(e) => {
+              setToolOption('rect', 'strokeWidth', Number(e.target.value))
+              updateActiveShape({ strokeWidth: Number(e.target.value) })
+            }}
             style={{ width: '40px' }}
           />
         </div>
+        <span style={{ ...labelStyle, marginLeft: 8, opacity: 0.6 }}>⇧ Shift = square</span>
       </div>
     )
   }
 
   if (activeTool === 'ellipse') {
     const opts = toolOptions.ellipse
+
+    const updateActiveShape = (props) => {
+      const fc = getFabric()
+      if (!fc) return
+      const obj = fc.getActiveObject()
+      if (obj) { obj.set(props); fc.renderAll() }
+    }
+
     return (
       <div style={barStyle}>
         <div style={sliderWrapStyle}>
@@ -202,7 +257,10 @@ export default function OptionsBar() {
           <input
             type="color"
             value={opts.fill}
-            onChange={(e) => setToolOption('ellipse', 'fill', e.target.value)}
+            onChange={(e) => {
+              setToolOption('ellipse', 'fill', e.target.value)
+              updateActiveShape({ fill: e.target.value })
+            }}
             style={{ width: '28px', height: '22px', padding: '1px', border: '1px solid var(--border)', borderRadius: '3px', cursor: 'pointer', background: 'none' }}
           />
         </div>
@@ -211,7 +269,10 @@ export default function OptionsBar() {
           <input
             type="color"
             value={opts.stroke === 'transparent' ? '#000000' : opts.stroke}
-            onChange={(e) => setToolOption('ellipse', 'stroke', e.target.value)}
+            onChange={(e) => {
+              setToolOption('ellipse', 'stroke', e.target.value)
+              updateActiveShape({ stroke: e.target.value })
+            }}
             style={{ width: '28px', height: '22px', padding: '1px', border: '1px solid var(--border)', borderRadius: '3px', cursor: 'pointer', background: 'none' }}
           />
         </div>
@@ -222,10 +283,14 @@ export default function OptionsBar() {
             min={0}
             max={20}
             value={opts.strokeWidth}
-            onChange={(e) => setToolOption('ellipse', 'strokeWidth', Number(e.target.value))}
+            onChange={(e) => {
+              setToolOption('ellipse', 'strokeWidth', Number(e.target.value))
+              updateActiveShape({ strokeWidth: Number(e.target.value) })
+            }}
             style={{ width: '40px' }}
           />
         </div>
+        <span style={{ ...labelStyle, marginLeft: 8, opacity: 0.6 }}>⇧ Shift = circle</span>
       </div>
     )
   }
@@ -244,7 +309,7 @@ export default function OptionsBar() {
         <span style={{ ...labelStyle, minWidth: '40px', textAlign: 'center' }}>{zoomPct}%</span>
         <button
           style={{ padding: '2px 8px', border: '1px solid var(--border)', borderRadius: '3px', background: 'transparent' }}
-          onClick={() => setZoom(Math.min(10, parseFloat((zoom + 0.25).toFixed(2))))}
+          onClick={() => setZoom(Math.min(16, parseFloat((zoom + 0.25).toFixed(2))))}
         >
           +
         </button>
@@ -271,10 +336,11 @@ export default function OptionsBar() {
   }
 
   return (
-    <div style={barStyle}>
-      {toolNames[activeTool] && (
-        <span style={labelStyle}>{toolNames[activeTool]}</span>
-      )}
+    <div style={{ ...barStyle, justifyContent: 'space-between' }}>
+      <span style={labelStyle}>{toolNames[activeTool] || ''}</span>
+      <span style={{ ...labelStyle, marginRight: 4 }}>
+        {Math.round(zoom * 100)}%
+      </span>
     </div>
   )
 }

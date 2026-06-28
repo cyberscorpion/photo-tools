@@ -46,10 +46,11 @@ export default function OptionsBar() {
   const selection = useEditorStore((s) => s.selection)
   const cropMode = useEditorStore((s) => s.cropMode)
 
-  if (cropMode || activeTool === 'crop') {
+  // Crop mode active (rect drawn) — show Apply / Cancel
+  if (cropMode) {
     return (
       <div style={barStyle}>
-        <span style={{ ...labelStyle, marginRight: 8 }}>Crop: Draw selection, then confirm</span>
+        <span style={{ ...labelStyle, marginRight: 8 }}>Drag handles to adjust • Enter to apply • Esc to cancel</span>
         <button
           onClick={confirmCrop}
           style={{
@@ -68,6 +69,15 @@ export default function OptionsBar() {
         >
           ✕ Cancel
         </button>
+      </div>
+    )
+  }
+
+  // Crop tool selected but handles not yet created (brief moment before activateCrop fires)
+  if (activeTool === 'crop') {
+    return (
+      <div style={barStyle}>
+        <span style={labelStyle}>Crop — drag handles to adjust, or drag to draw a new crop area</span>
       </div>
     )
   }

@@ -28,6 +28,57 @@ const initialAdjustments = {
   blur: 0,
 }
 
+const _initialTabId = crypto.randomUUID()
+
+const PER_TAB_STATE_KEYS = [
+  'fileName','hasImage','imageSize','zoom','adjustments',
+  'activeFilters','layers','activeLayerId','history','historyIndex','cropMode',
+]
+
+function captureTabSnapshot(state) {
+  const fc = getFabric()
+  const snap = {}
+  PER_TAB_STATE_KEYS.forEach((k) => { snap[k] = state[k] })
+  snap.fabricJSON = fc ? fc.toJSON(['customId','layerId']) : null
+  return snap
+}
+
+function loadTabSnapshot(snap, tabs, newActiveId) {
+  const fc = getFabric()
+  const flatState = { activeTabId: newActiveId, tabs }
+  PER_TAB_STATE_KEYS.forEach((k) => {
+    flatState[k] = snap[k] !== undefined ? snap[k] : getDefaultForKey(k)
+  })
+  flatState.showWelcome = !(snap.hasImage ?? false)
+  flatState.cropMode = false
+  return flatState
+}
+
+function getDefaultForKey(key) {
+  const defaults = {
+    fileName: null, hasImage: false, imageSize: { w: 0, h: 0 }, zoom: 1.0,
+    adjustments: { brightness:0,contrast:0,saturation:0,hue:0,exposure:0,warmth:0,tint:0,shadows:0,highlights:0,sharpness:0,blur:0 },
+    activeFilters: [], layers: [], activeLayerId: null,
+    history: [], historyIndex: -1, cropMode: false,
+  }
+  return defaults[key]
+}
+
+function reloadCanvas(snap) {
+  const fc = getFabric()
+  if (!fc) return
+  fc.clear()
+  const w = snap.imageSize?.w || 800
+  const h = snap.imageSize?.h || 600
+  fc.setWidth(w)
+  fc.setHeight(h)
+  if (snap.fabricJSON) {
+    fc.loadFromJSON(snap.fabricJSON).then(() => fc.renderAll()).catch(() => {})
+  } else {
+    fc.renderAll()
+  }
+}
+
 export const useEditorStore = create((set, get) => ({
   // ── File / canvas meta ──────────────────────────────────────────────────────
   fileName: null,
@@ -74,6 +125,10 @@ export const useEditorStore = create((set, get) => ({
   showWelcome: true,
   cropMode: false,
 
+  // ── Tabs ────────────────────────────────────────────────────────────────────
+  tabs: [{ id: _initialTabId, name: 'Untitled' }],
+  activeTabId: _initialTabId,
+
   // ── Actions ─────────────────────────────────────────────────────────────────
 
   setActiveTool: (id) => set({ activeTool: id }),
@@ -92,7 +147,13 @@ export const useEditorStore = create((set, get) => ({
   setZoom: (level) => set({ zoom: level }),
   setPanOffset: ({ x, y }) => set({ panOffset: { x, y } }),
 
-  setFileName: (name) => set({ fileName: name }),
+  setFileName: (name) =>
+    set((s) => ({
+      fileName: name,
+      tabs: s.tabs.map((t) =>
+        t.id === s.activeTabId ? { ...t, name: name || 'Untitled' } : t
+      ),
+    })),
   setImageSize: ({ w, h }) => set({ imageSize: { w, h } }),
   setShowWelcome: (bool) => set({ showWelcome: bool }),
   setHasImage: (bool) => set({ hasImage: bool }),
@@ -305,4 +366,76 @@ export const useEditorStore = create((set, get) => ({
     }),
 
   setCropMode: (bool) => set({ cropMode: bool }),
+
+  // ── Tab actions ──────────────────────────────────────────────────────────────
+
+  addTab: () =>
+    set((s) => {
+      const snap = captureTabSnapshot(s)
+      const newId = crypto.randomUUID()
+      const updatedTabs = [
+        ...s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, ...snap } : t)),
+        { id: newId, name: 'Untitled' },
+      ]
+      const fc = getFabric()
+      if (fc) {
+        fc.clear()
+        fc.setWidth(800)
+        fc.setHeight(600)
+        fc.renderAll()
+      }
+      return {
+        activeTabId: newId,
+        tabs: updatedTabs,
+        fileName: null,
+        hasImage: false,
+        imageSize: { w: 0, h: 0 },
+        zoom: 1.0,
+        adjustments: getDefaultForKey('adjustments'),
+        activeFilters: [],
+        layers: [],
+        activeLayerId: null,
+        history: [],
+        historyIndex: -1,
+        cropMode: false,
+        showWelcome: true,
+      }
+    }),
+
+  switchTab: (id) => {
+    const state = get()
+    if (id === state.activeTabId) return
+    const snap = captureTabSnapshot(state)
+    const updatedTabs = state.tabs.map((t) =>
+      t.id === state.activeTabId ? { ...t, ...snap } : t
+    )
+    const targetTab = updatedTabs.find((t) => t.id === id)
+    if (!targetTab) return
+    const flatState = loadTabSnapshot(targetTab, updatedTabs, id)
+    set(flatState)
+    reloadCanvas(targetTab)
+  },
+
+  closeTab: (id) => {
+    const state = get()
+    const newTabs = state.tabs.filter((t) => t.id !== id)
+    if (newTabs.length === 0) {
+      const freshId = crypto.randomUUID()
+      newTabs.push({ id: freshId, name: 'Untitled' })
+    }
+    if (id !== state.activeTabId) {
+      set({ tabs: newTabs })
+      return
+    }
+    const closedIdx = state.tabs.findIndex((t) => t.id === id)
+    const nextTab = newTabs[Math.max(0, closedIdx - 1)] || newTabs[0]
+    const flatState = loadTabSnapshot(nextTab, newTabs, nextTab.id)
+    set(flatState)
+    reloadCanvas(nextTab)
+  },
+
+  renameTab: (id, name) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
+    })),
 }))

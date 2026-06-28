@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import MenuBar from './MenuBar.jsx'
 import OptionsBar from './OptionsBar.jsx'
+import TabBar from './TabBar.jsx'
 import ToolBar from './ToolBar.jsx'
 import WorkspaceArea from './WorkspaceArea.jsx'
 import StatusBar from './StatusBar.jsx'
@@ -15,11 +16,12 @@ const shellStyle = {
   gridTemplateAreas: `
     "menubar    menubar    menubar"
     "optionsbar optionsbar optionsbar"
+    "tabbar     tabbar     tabbar"
     "toolbar    workspace  panels"
     "statusbar  statusbar  statusbar"
   `,
   gridTemplateColumns: 'var(--toolbar-w) 1fr var(--panel-w)',
-  gridTemplateRows: 'var(--menubar-h) var(--optionsbar-h) 1fr var(--statusbar-h)',
+  gridTemplateRows: 'var(--menubar-h) var(--optionsbar-h) 32px 1fr var(--statusbar-h)',
   height: '100vh',
   overflow: 'hidden',
 }
@@ -47,6 +49,7 @@ export default function AppShell() {
     <div style={shellStyle}>
       <MenuBar />
       <OptionsBar />
+      <TabBar />
       <ToolBar />
       <WorkspaceArea onCursorMove={handleCursorMove} />
       <div style={panelsSidebarStyle}>

@@ -418,65 +418,161 @@ function activateEllipse(fc, toolOptions) {
 
 function activateCrop(fc) {
   fc.isDrawingMode = false
-  fc.selection = false
-  fc.defaultCursor = 'crosshair'
+  fc.selection = true    // Must be true so Fabric shows handles on the crop rect
+  fc.defaultCursor = 'default'
 
-  // Lock all existing objects so dragging crop box doesn't move the image
+  // Lock all existing objects so only the crop rect is interactive
   fc.forEachObject((o) => {
-    o._savedSelectable = o.selectable
-    o._savedEvented = o.evented
+    o._cropSaved = { selectable: o.selectable, evented: o.evented }
     o.selectable = false
     o.evented = false
   })
 
   let cropRect = null
+  let overlayRects = []
   let cropDrawing = false
   let cropOrigin = { x: 0, y: 0 }
 
+  // ── Build a styled crop rect with Fabric's resize handles ─────────────────
+  const makeCropRect = (left, top, width, height) => {
+    const r = new Rect({
+      left, top, width, height,
+      fill: 'transparent',
+      stroke: '#ffffff',
+      strokeWidth: 1,
+      strokeDashArray: [6, 3],
+      selectable: true,
+      evented: true,
+      lockRotation: true,
+      lockSkewingX: true,
+      lockSkewingY: true,
+      cornerColor: '#ffffff',
+      cornerStyle: 'rect',
+      cornerSize: 9,
+      cornerStrokeColor: '#cccccc',
+      transparentCorners: false,
+      borderColor: 'rgba(255,255,255,0.85)',
+      borderScaleFactor: 1,
+      hasRotatingPoint: false,
+    })
+    r.setControlsVisibility({ mtr: false })   // hide rotation handle
+    r.layerId = 'crop-overlay'
+    return r
+  }
+
+  // ── Semi-transparent darkening strips outside the crop rect ───────────────
+  const updateOverlay = () => {
+    overlayRects.forEach((r) => fc.remove(r))
+    overlayRects = []
+    if (!cropRect) return
+
+    // Get actual rendered bounds (accounts for scaleX/scaleY from handle dragging)
+    const b = cropRect.getBoundingRect()
+    const cw = fc.width, ch = fc.height
+    const cl = Math.max(0, b.left), ct = Math.max(0, b.top)
+    const cr = Math.min(cw, b.left + b.width), cb = Math.min(ch, b.top + b.height)
+    const dark = 'rgba(0,0,0,0.45)'
+
+    const strips = [
+      [0,   0,   cw,      ct     ],   // top
+      [0,   cb,  cw,      ch - cb],   // bottom
+      [0,   ct,  cl,      cb - ct],   // left
+      [cr,  ct,  cw - cr, cb - ct],   // right
+    ]
+
+    strips.forEach(([l, t, w, h]) => {
+      if (w <= 0 || h <= 0) return
+      const strip = new Rect({ left: l, top: t, width: w, height: h,
+        fill: dark, selectable: false, evented: false, layerId: 'crop-overlay' })
+      overlayRects.push(strip)
+      fc.add(strip)
+      fc.sendObjectToBack(strip)
+    })
+
+    fc.bringObjectToFront(cropRect)
+    fc.renderAll()
+  }
+
+  // ── Create initial crop rect covering the full canvas ─────────────────────
+  cropRect = makeCropRect(0, 0, fc.width, fc.height)
+  fc.add(cropRect)
+  fc.setActiveObject(cropRect)
+  updateOverlay()
+
+  // Signal immediately so OptionsBar shows Apply/Cancel
+  useEditorStore.getState().setCropMode(true)
+
+  // Update overlay strips whenever the crop rect is transformed
+  fc.on('object:moving',  updateOverlay)
+  fc.on('object:scaling', updateOverlay)
+  fc.on('object:modified', updateOverlay)
+
+  // ── Allow drawing a NEW crop rect by dragging on blank canvas ─────────────
   const onMouseDown = (e) => {
-    // Only start drawing on empty canvas area
+    const target = fc.findTarget(e.e)
+    if (target && target.layerId === 'crop-overlay') return  // clicking on crop rect → Fabric handles it
+    if (target) return
+
     cropDrawing = true
     const point = getPointer(fc, e)
     cropOrigin = point
-    if (cropRect) fc.remove(cropRect)
-    cropRect = new Rect({
-      left: point.x, top: point.y, width: 0, height: 0,
-      fill: 'rgba(0,0,0,0.3)',
-      stroke: '#ffffff', strokeWidth: 1, strokeDashArray: [6, 3],
-      selectable: false, evented: false,
-    })
+
+    // Remove current crop rect and overlays
+    if (cropRect) { fc.remove(cropRect); cropRect = null }
+    overlayRects.forEach((r) => fc.remove(r)); overlayRects = []
+
+    cropRect = makeCropRect(point.x, point.y, 0, 0)
     fc.add(cropRect)
   }
 
   const onMouseMove = (e) => {
     if (!cropDrawing || !cropRect) return
     const point = getPointer(fc, e)
+    const dx = point.x - cropOrigin.x
+    const dy = point.y - cropOrigin.y
+    const size = e.e.shiftKey ? Math.min(Math.abs(dx), Math.abs(dy)) : null
     cropRect.set({
-      left: Math.min(point.x, cropOrigin.x),
-      top: Math.min(point.y, cropOrigin.y),
-      width: Math.abs(point.x - cropOrigin.x),
-      height: Math.abs(point.y - cropOrigin.y),
+      left:   dx < 0 ? (size ? cropOrigin.x - size : point.x) : cropOrigin.x,
+      top:    dy < 0 ? (size ? cropOrigin.y - size : point.y) : cropOrigin.y,
+      width:  size || Math.abs(dx),
+      height: size || Math.abs(dy),
     })
     fc.renderAll()
   }
 
   const onMouseUp = () => {
+    if (!cropDrawing) return
     cropDrawing = false
-    if (!cropRect || cropRect.width < 4 || cropRect.height < 4) return
-    // Signal store that crop mode is active (OptionsBar shows Done/Cancel)
-    useEditorStore.getState().setCropMode(true)
+    if (!cropRect || cropRect.width < 4 || cropRect.height < 4) {
+      // Tiny drag → restore full-canvas crop rect
+      if (cropRect) { fc.remove(cropRect); cropRect = null }
+      cropRect = makeCropRect(0, 0, fc.width, fc.height)
+      fc.add(cropRect)
+    }
+    fc.setActiveObject(cropRect)
+    updateOverlay()
   }
 
+  // ── Shared helpers ────────────────────────────────────────────────────────
   const restoreObjects = () => {
     fc.forEachObject((o) => {
-      if ('_savedSelectable' in o) { o.selectable = o._savedSelectable; delete o._savedSelectable }
-      if ('_savedEvented' in o) { o.evented = o._savedEvented; delete o._savedEvented }
+      if (o._cropSaved) {
+        o.selectable = o._cropSaved.selectable
+        o.evented    = o._cropSaved.evented
+        delete o._cropSaved
+      }
     })
   }
 
-  const doCancel = () => {
+  const clearOverlay = () => {
     if (cropRect) { fc.remove(cropRect); cropRect = null }
+    overlayRects.forEach((r) => fc.remove(r)); overlayRects = []
+    fc.discardActiveObject()
     fc.renderAll()
+  }
+
+  const doCancel = () => {
+    clearOverlay()
     restoreObjects()
     useEditorStore.getState().setCropMode(false)
     _cropConfirm = null
@@ -484,30 +580,26 @@ function activateCrop(fc) {
   }
 
   const doConfirm = async () => {
-    if (!cropRect || cropRect.width < 4 || cropRect.height < 4) { doCancel(); return }
+    if (!cropRect) { doCancel(); return }
 
-    // Use cropRect's own properties — getBoundingRect has unreliable signatures across Fabric versions
-    const x = Math.max(0, Math.round(cropRect.left))
-    const y = Math.max(0, Math.round(cropRect.top))
-    const w = Math.min(fc.width - x, Math.round(cropRect.width))
-    const h = Math.min(fc.height - y, Math.round(cropRect.height))
+    // getBoundingRect() accounts for scaleX/scaleY from handle dragging
+    const b  = cropRect.getBoundingRect()
+    const x  = Math.max(0, Math.round(b.left))
+    const y  = Math.max(0, Math.round(b.top))
+    const w  = Math.min(fc.width  - x, Math.round(b.width))
+    const h  = Math.min(fc.height - y, Math.round(b.height))
 
     if (w < 2 || h < 2) { doCancel(); return }
 
-    // Remove overlay, render clean canvas, then capture via offscreen canvas
-    fc.remove(cropRect)
-    cropRect = null
-    fc.renderAll()
+    clearOverlay()
 
-    // Draw from the Fabric lower-canvas element — more reliable than fc.toDataURL with crop params
-    const srcEl = fc.getElement()
+    const srcEl   = fc.getElement()
     const offscreen = document.createElement('canvas')
-    offscreen.width = w
+    offscreen.width  = w
     offscreen.height = h
     offscreen.getContext('2d').drawImage(srcEl, x, y, w, h, 0, 0, w, h)
     const croppedDataURL = offscreen.toDataURL('image/png')
 
-    // Rebuild canvas at crop dimensions
     fc.clear()
     fc.setWidth(w)
     fc.setHeight(h)
@@ -537,6 +629,9 @@ function activateCrop(fc) {
 
   return () => {
     cropDrawing = false
+    fc.off('object:moving',  updateOverlay)
+    fc.off('object:scaling', updateOverlay)
+    fc.off('object:modified', updateOverlay)
     doCancel()
     offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:up': onMouseUp })
   }

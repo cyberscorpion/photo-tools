@@ -10,6 +10,12 @@ export function useFileOpen() {
 
   const openFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return
+    // If the current tab already has an image, open in a new tab
+    if (useEditorStore.getState().hasImage) {
+      useEditorStore.getState().addTab()
+      // Small yield so the store + canvas clear can settle
+      await new Promise((r) => setTimeout(r, 20))
+    }
     const dataURL = await new Promise((res) => {
       const reader = new FileReader()
       reader.onload = e => res(e.target.result)

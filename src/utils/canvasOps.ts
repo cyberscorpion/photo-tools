@@ -1,25 +1,37 @@
-import { getFabric } from '../canvas/fabricManager.ts'
+import { getFabric, setSuppressHistoryBridge } from '../canvas/fabricManager.ts'
 
-/** Get the lower (rendering) canvas element */
+// All layerIds that are overlays / non-content objects — never treat these as the background image
+const OVERLAY_LAYER_IDS = new Set(['contour', 'selection', 'crop-overlay', 'clone-overlay'])
+
+/**
+ * Get the lower (rendering) canvas element.
+ * Fabric keeps it as lowerCanvasEl; if that's unavailable we fall back to a
+ * DOM query on the wrapper element so the function works across all builds.
+ */
 export function getLowerCanvasEl(): HTMLCanvasElement | null {
   const fc = getFabric() as any
-  return (fc?.lowerCanvasEl as HTMLCanvasElement | undefined) ?? null
+  if (!fc) return null
+  // Direct property (standard Fabric v6)
+  if (fc.lowerCanvasEl instanceof HTMLCanvasElement) return fc.lowerCanvasEl
+  // DOM fallback: lower-canvas sits alongside upper-canvas inside the wrapper
+  const upper = (fc.upperCanvasEl ?? fc.getElement?.()) as HTMLCanvasElement | undefined
+  if (upper?.parentElement) {
+    const lower = upper.parentElement.querySelector<HTMLCanvasElement>('canvas:not(.upper-canvas)')
+    if (lower) return lower
+  }
+  return null
 }
 
 /** Get the lower canvas 2D context from Fabric */
 export function getLowerCtx(): CanvasRenderingContext2D | null {
-  const fc = getFabric() as any
-  if (!fc) return null
-  const lowerEl = (fc.lowerCanvasEl ?? fc._objects?.[0]?.canvas?.lowerCanvasEl) as HTMLCanvasElement | undefined
-  if (!lowerEl) return null
-  return lowerEl.getContext('2d')
+  return getLowerCanvasEl()?.getContext('2d') ?? null
 }
 
 /** Reload the entire lower canvas content as a new base FabricImage, replacing the background layer */
 export async function reloadCanvasAsImage(): Promise<void> {
   const fc = getFabric() as any
   if (!fc) return
-  const lowerEl = fc.lowerCanvasEl as HTMLCanvasElement | undefined
+  const lowerEl = getLowerCanvasEl()
   if (!lowerEl) return
   const w = fc.width as number
   const h = fc.height as number
@@ -35,18 +47,27 @@ export async function reloadCanvasAsImage(): Promise<void> {
     reader.readAsDataURL(blob)
   })
 
-  // Replace the base background image with the captured content
-  const { FabricImage } = await import('fabric')
-  const objects = (fc.getObjects() as any[])
-  const bg = objects.find((o: any) => o.layerId !== 'contour' && o.layerId !== 'selection' && o.layerId !== 'crop-overlay')
-  const bgLayerId = bg?.layerId ?? 'background'
-  if (bg) fc.remove(bg)
+  // Suppress the event bridge for ALL internal Fabric operations below.
+  // sendObjectToBack() and fc.add() can fire object:modified/object:added,
+  // which would push a duplicate history entry on top of the caller's
+  // explicit pushHistory() call — causing "Ctrl+Z skips two operations".
+  setSuppressHistoryBridge(true)
+  try {
+    const { FabricImage } = await import('fabric')
+    const objects = (fc.getObjects() as any[])
+    // Find the background image — skip ALL overlay/system objects
+    const bg = objects.find((o: any) => !OVERLAY_LAYER_IDS.has(o.layerId))
+    const bgLayerId = bg?.layerId ?? 'background'
+    if (bg) fc.remove(bg)
 
-  const img = await FabricImage.fromURL(dataURL)
-  img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: bgLayerId } as any)
-  fc.add(img)
-  fc.sendObjectToBack(img as any)
-  fc.renderAll()
+    const img = await FabricImage.fromURL(dataURL)
+    img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: bgLayerId } as any)
+    fc.add(img)
+    fc.sendObjectToBack(img as any)
+    fc.renderAll()
+  } finally {
+    setSuppressHistoryBridge(false)
+  }
 }
 
 /**

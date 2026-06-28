@@ -1,37 +1,24 @@
+// CSS transform in WorkspaceArea is the single source of truth for visual zoom.
+// Fabric's viewportTransform MUST stay at identity — calling fc.setZoom() or
+// fc.zoomToPoint() corrupts getViewportPoint() coordinate calculations for all
+// tools (divides every pointer position by the internal zoom factor).
 import { useCallback } from 'react'
 import { useEditorStore } from '../store/editorStore.js'
-import { getFabric } from '../canvas/fabricManager.js'
 
 export function useZoom() {
   const { zoom, setZoom } = useEditorStore()
 
-  const handleWheel = useCallback((e) => {
+  const handleWheel = useCallback((e: WheelEvent) => {
     if (!e.ctrlKey) return
     e.preventDefault()
-    const fc = getFabric()
-    if (!fc) return
     const delta = e.deltaY > 0 ? -0.1 : 0.1
-    const newZoom = Math.min(20, Math.max(0.1, zoom + delta))
-    fc.zoomToPoint({ x: e.offsetX, y: e.offsetY }, newZoom)
+    const newZoom = Math.min(16, Math.max(0.05, parseFloat((zoom + delta).toFixed(3))))
     setZoom(newZoom)
   }, [zoom, setZoom])
 
-  const zoomIn = () => {
-    const fc = getFabric(); if (!fc) return
-    const nz = Math.min(20, zoom + 0.25)
-    fc.setZoom(nz); setZoom(nz)
-  }
-  const zoomOut = () => {
-    const fc = getFabric(); if (!fc) return
-    const nz = Math.max(0.1, zoom - 0.25)
-    fc.setZoom(nz); setZoom(nz)
-  }
-  const fitToScreen = (containerW, containerH) => {
-    const store = useEditorStore.getState()
-    const nz = Math.min(containerW / store.imageSize.w, containerH / store.imageSize.h, 1)
-    const fc = getFabric(); if (!fc) return
-    fc.setZoom(nz); setZoom(nz)
-  }
+  const zoomIn       = () => setZoom(Math.min(16, parseFloat((zoom * 1.25).toFixed(3))))
+  const zoomOut      = () => setZoom(Math.max(0.05, parseFloat((zoom / 1.25).toFixed(3))))
+  const fitToScreen  = () => setZoom(1)
 
   return { zoom, handleWheel, zoomIn, zoomOut, fitToScreen }
 }

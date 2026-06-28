@@ -1,10 +1,10 @@
 import { IText, Rect, Ellipse, Path, PencilBrush, FabricImage, Line, Polygon, Circle } from 'fabric'
 import { buildPolygonPoints } from '../utils/canvasOps.ts'
-import { getFabric } from './fabricManager.js'
+import { getFabric, setSuppressHistoryBridge } from './fabricManager.js'
 import { panContainer } from './viewportManager.js'
 import { useEditorStore } from '../store/editorStore.js'
 import { showSelectionRect, showSelectionEllipse, showSelectionPath, clearSelectionOverlay } from './selectionOverlay.ts'
-import { floodFill, applyMaskFill, hexToRgbArr, getLowerCtx, reloadCanvasAsImage, sampleCircle, boxBlur } from '../utils/canvasOps.ts'
+import { floodFill, applyMaskFill, hexToRgbArr, getLowerCtx, getLowerCanvasEl, reloadCanvasAsImage, sampleCircle, boxBlur } from '../utils/canvasOps.ts'
 
 // ── Internal state ────────────────────────────────────────────────────────────
 
@@ -1163,50 +1163,272 @@ function activateLassoPoly(fc: any) {
 }
 
 function activateCloneStamp(fc: any, toolOptions: any) {
-  const opts = toolOptions['clone-stamp'] ?? { size: 30, opacity: 100 }
-  fc.isDrawingMode = true; fc.selection = false
-  const brush = new PencilBrush(fc)
-  brush.color = 'rgba(0,0,0,0.01)'; brush.width = opts.size
-  fc.freeDrawingBrush = brush
+  // Clone Stamp — clean implementation using the UPPER canvas for all visual
+  // indicators. The upper canvas (Fabric's event/selection overlay layer) is
+  // transparent and is NEVER captured by reloadCanvasAsImage() which reads the
+  // lower (rendering) canvas. This prevents crosshairs from being baked into
+  // the image on Alt+click or after a stroke.
 
-  let sampleOrigin: { x: number; y: number } | null = null
-  let strokeStart: { x: number; y: number } | null = null
+  fc.isDrawingMode = false
+  fc.selection     = false
+  // Reset viewport to identity in case it was drifted by old fc.setZoom() calls
+  fc.setViewportTransform([1, 0, 0, 1, 0, 0])
+  fc.defaultCursor = 'crosshair'
+
+  fc.forEachObject((o: any) => {
+    o._csSel = o.selectable; o._csEvt = o.evented
+    o.selectable = false; o.evented = false
+  })
+
+  const opts = toolOptions['clone-stamp'] ?? { size: 30, opacity: 100 }
+
+  let sampleOrigin:      { x: number; y: number } | null = null
+  let strokeStart:       { x: number; y: number } | null = null
+  let strokeSnapshot:    HTMLCanvasElement | null = null  // composite snapshot for sampling
+  let strokeLayerCanvas: HTMLCanvasElement | null = null  // accumulates dabs for the active layer
+  let paintLayerId:      string | null = null             // layer receiving the paint
+  let isPainting       = false
+  // Tracks the position of the last painted dab so we can interpolate between
+  // mouse events — prevents gaps when moving the mouse quickly.
+  let lastDabPos:      { x: number; y: number } | null = null
+
+  // System layerIds that are never the paint target
+  const SYSTEM_LAYER_IDS = new Set(['contour', 'selection', 'crop-overlay', 'clone-overlay'])
+
+  // ── Upper canvas helpers — draw ONLY here, never on lower canvas ─────────
+  const getUpperCtx = (): CanvasRenderingContext2D | null => {
+    const upper = (fc as any).upperCanvasEl as HTMLCanvasElement | undefined
+    return upper?.getContext('2d') ?? null
+  }
+
+  const clearOverlay = () => {
+    const ctx = getUpperCtx()
+    if (ctx) ctx.clearRect(0, 0, fc.width, fc.height)
+  }
+
+  const drawCrosshair = (
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, r: number,
+    color: string, dashed = false
+  ) => {
+    ctx.save()
+    ctx.strokeStyle = color
+    ctx.lineWidth = 1.5
+    if (dashed) ctx.setLineDash([4, 3])
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(x - r - 4, y); ctx.lineTo(x + r + 4, y)
+    ctx.moveTo(x, y - r - 4); ctx.lineTo(x, y + r + 4)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  const redrawSourceTarget = () => {
+    if (!sampleOrigin) return
+    const ctx = getUpperCtx()
+    if (!ctx) return
+    clearOverlay()
+    // White dashed crosshair at the fixed sample origin
+    drawCrosshair(ctx, sampleOrigin.x, sampleOrigin.y, 10, 'rgba(255,255,255,0.9)', true)
+  }
+
+  // ── Event handlers ────────────────────────────────────────────────────────
 
   const onMouseDown = (e: any) => {
+    // Prevent browser alt-key default (menu bar focus, system zoom, etc.)
+    if (e.e.altKey) e.e.preventDefault()
+
     if (e.e.altKey) {
       sampleOrigin = getPointer(fc, e)
-      fc.isDrawingMode = false
-    } else if (sampleOrigin) {
-      fc.isDrawingMode = true
-      strokeStart = getPointer(fc, e)
+      redrawSourceTarget()
+      fc.defaultCursor = 'copy'
+      return
     }
-  }
 
-  const onPathCreated = async (e: any) => {
-    fc.remove(e.path)
-    if (!sampleOrigin || !strokeStart) return
-    const ctx = getLowerCtx(); if (!ctx) return
-    const path = e.path
-    const coords = (path.path || []) as [string, number, number][]
-    const r = opts.size
-    for (const [cmd, cx, cy] of coords) {
-      if (cmd === 'M' || cmd === 'L') {
-        const dx = cx - strokeStart.x, dy = cy - strokeStart.y
-        const sx = Math.round(sampleOrigin.x + dx - r), sy = Math.round(sampleOrigin.y + dy - r)
-        const dx2 = Math.round(cx - r), dy2 = Math.round(cy - r)
-        ctx.globalAlpha = (opts.opacity ?? 100) / 100
-        ctx.drawImage(fc.getElement() as HTMLCanvasElement, sx, sy, r*2, r*2, dx2, dy2, r*2, r*2)
-        ctx.globalAlpha = 1
+    if (!sampleOrigin) {
+      fc.defaultCursor = 'not-allowed'
+      return
+    }
+
+    isPainting  = true
+    strokeStart = getPointer(fc, e)
+    fc.defaultCursor = 'crosshair'
+
+    // Snapshot the COMPOSITE lower canvas — used for sampling (what to clone from)
+    const lowerEl = getLowerCanvasEl()
+    if (lowerEl) {
+      strokeSnapshot = document.createElement('canvas')
+      strokeSnapshot.width  = lowerEl.width
+      strokeSnapshot.height = lowerEl.height
+      strokeSnapshot.getContext('2d')!.drawImage(lowerEl, 0, 0)
+    }
+
+    // Determine which layer receives the paint
+    const { activeLayerId } = useEditorStore.getState()
+    paintLayerId = activeLayerId
+
+    // strokeLayerCanvas accumulates dabs for this layer only.
+    // Seed it with the active layer's existing pixel content so painting over
+    // a non-empty layer correctly composites onto what's already there.
+    strokeLayerCanvas = document.createElement('canvas')
+    strokeLayerCanvas.width  = fc.width
+    strokeLayerCanvas.height = fc.height
+    const activeLayerObj = fc.getObjects().find(
+      (o: any) => o.layerId === paintLayerId && !SYSTEM_LAYER_IDS.has(o.layerId)
+    ) as any
+    if (activeLayerObj) {
+      const el = activeLayerObj._element ?? activeLayerObj.getElement?.()
+      if (el) {
+        strokeLayerCanvas.getContext('2d')!.drawImage(
+          el,
+          activeLayerObj.left ?? 0,
+          activeLayerObj.top  ?? 0
+        )
       }
     }
-    await reloadCanvasAsImage()
-    useEditorStore.getState().pushHistory('Clone Stamp', fc.toJSON(['customId','layerId']))
+
+    // Initialise the interpolation cursor to the stroke start position
+    lastDabPos = { x: strokeStart!.x, y: strokeStart!.y }
   }
 
-  fc.on('mouse:down', onMouseDown); fc.on('path:created', onPathCreated)
+  const paintDab = (
+    ctx: CanvasRenderingContext2D,
+    dstX: number, dstY: number,
+    r: number, alpha: number
+  ) => {
+    if (!sampleOrigin || !strokeStart || !strokeSnapshot) return
+    const offsetX = dstX - strokeStart.x
+    const offsetY = dstY - strokeStart.y
+    const srcX = Math.round(sampleOrigin.x + offsetX)
+    const srcY = Math.round(sampleOrigin.y + offsetY)
+
+    const drawDab = (target: CanvasRenderingContext2D) => {
+      target.save()
+      target.globalAlpha = alpha
+      target.beginPath(); target.arc(dstX, dstY, r, 0, Math.PI * 2); target.clip()
+      target.drawImage(strokeSnapshot!, srcX - r, srcY - r, r * 2, r * 2, dstX - r, dstY - r, r * 2, r * 2)
+      target.restore()
+    }
+
+    // Paint to the lower canvas for real-time visual feedback
+    drawDab(ctx)
+
+    // Also paint to the layer canvas — this is what gets committed to the
+    // active layer on mouse:up, keeping it independent of other layers.
+    const layerCtx = strokeLayerCanvas?.getContext('2d')
+    if (layerCtx) drawDab(layerCtx)
+  }
+
+  const onMouseMove = (e: any) => {
+    if (!isPainting || !sampleOrigin || !strokeStart || !strokeSnapshot) return
+
+    const p   = getPointer(fc, e)
+    const ctx = getLowerCtx()
+    if (!ctx) return
+
+    const r     = Math.round((opts.size ?? 30) / 2)
+    const alpha = (opts.opacity ?? 100) / 100
+
+    // ── Interpolation: fill gaps when mouse moves faster than event rate ──────
+    // Paint dabs every `step` pixels along the line from lastDabPos to p.
+    // Step = 25% of radius → ~4 dabs per radius → visually seamless at any speed.
+    const from  = lastDabPos ?? { x: p.x, y: p.y }
+    const dx    = p.x - from.x
+    const dy    = p.y - from.y
+    const dist  = Math.hypot(dx, dy)
+    const step  = Math.max(1, r * 0.25)
+    const steps = dist < step ? 1 : Math.ceil(dist / step)
+
+    for (let i = 1; i <= steps; i++) {
+      const t    = i / steps
+      const dabX = Math.round(from.x + dx * t)
+      const dabY = Math.round(from.y + dy * t)
+      paintDab(ctx, dabX, dabY, r, alpha)
+    }
+
+    lastDabPos = { x: p.x, y: p.y }
+
+    // ── Overlay: source crosshair tracks the current source offset ────────────
+    const offsetX = p.x - strokeStart.x
+    const offsetY = p.y - strokeStart.y
+    const srcX    = Math.round(sampleOrigin.x + offsetX)
+    const srcY    = Math.round(sampleOrigin.y + offsetY)
+    const uctx = getUpperCtx()
+    if (uctx) {
+      clearOverlay()
+      drawCrosshair(uctx, sampleOrigin.x, sampleOrigin.y, 10, 'rgba(255,255,255,0.85)', true)
+      drawCrosshair(uctx, srcX, srcY, r, 'rgba(255,210,0,0.8)')
+    }
+  }
+
+  const onMouseUp = async () => {
+    if (!isPainting) return
+    isPainting     = false
+    strokeSnapshot = null
+    lastDabPos     = null
+
+    clearOverlay()
+
+    // ── Commit stroke to the active layer only ────────────────────────────────
+    // strokeLayerCanvas holds all dabs painted during this stroke on top of
+    // whatever content the active layer already had. We replace only that
+    // layer's FabricImage — other layers are untouched.
+    const targetId = paintLayerId
+    const layerSnap = strokeLayerCanvas
+    strokeLayerCanvas = null
+    paintLayerId = null
+
+    if (layerSnap && targetId) {
+      const blob = await new Promise<Blob>(res => layerSnap.toBlob(b => res(b!), 'image/png'))
+      const dataURL = await new Promise<string>(res => {
+        const fr = new FileReader()
+        fr.onload = e => res(e.target!.result as string)
+        fr.readAsDataURL(blob)
+      })
+
+      setSuppressHistoryBridge(true)
+      try {
+        const { FabricImage: FI } = await import('fabric')
+        // Remove existing FabricImage(s) for this layer
+        fc.getObjects()
+          .filter((o: any) => o.layerId === targetId && !SYSTEM_LAYER_IDS.has(o.layerId))
+          .forEach((o: any) => fc.remove(o))
+
+        const img = await FI.fromURL(dataURL)
+        img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: targetId } as any)
+        fc.add(img)
+        fc.sendObjectToBack(img as any)
+        fc.renderAll()
+      } finally {
+        setSuppressHistoryBridge(false)
+      }
+
+      useEditorStore.getState().pushHistory('Clone Stamp', fc.toJSON(['customId', 'layerId']))
+    }
+
+    redrawSourceTarget()
+    fc.defaultCursor = 'copy'
+  }
+
+  fc.on('mouse:down', onMouseDown)
+  fc.on('mouse:move', onMouseMove)
+  fc.on('mouse:up',   onMouseUp)
+
   return () => {
-    fc.isDrawingMode = false; sampleOrigin = null; strokeStart = null
-    offAll(fc, { 'mouse:down': onMouseDown }); fc.off('path:created', onPathCreated)
+    isPainting        = false
+    sampleOrigin      = null
+    strokeStart       = null
+    strokeSnapshot    = null
+    strokeLayerCanvas = null
+    paintLayerId      = null
+    lastDabPos        = null
+    clearOverlay()
+    fc.defaultCursor = 'default'
+    fc.forEachObject((o: any) => {
+      if ('_csSel' in o) { o.selectable = o._csSel; delete o._csSel }
+      if ('_csEvt' in o) { o.evented    = o._csEvt; delete o._csEvt }
+    })
+    offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:up': onMouseUp })
   }
 }
 

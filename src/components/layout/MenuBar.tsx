@@ -293,12 +293,10 @@ export default function MenuBar() {
   }, [applyCanvasTransform])
 
   const applyZoom = useCallback((newZoom) => {
+    // CSS transform in WorkspaceArea handles the visual zoom.
+    // NEVER call fc.setZoom() — it sets Fabric's internal viewportTransform,
+    // which corrupts all coordinate calculations (getViewportPoint divides by it).
     setZoom(newZoom)
-    const fc = getFabric()
-    if (fc) {
-      fc.setZoom(newZoom)
-      fc.renderAll()
-    }
   }, [setZoom])
 
   const handleFitToScreen = useCallback(() => {

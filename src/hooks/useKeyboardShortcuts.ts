@@ -29,6 +29,14 @@ export function useKeyboardShortcuts() {
       const fc  = getFabric()
       const key = e.key.toLowerCase()
 
+      // Alt key alone (no other modifier) — prevent browser default when
+      // clone stamp is active so Alt+click sets source without triggering the
+      // browser menu bar, accessibility zoom, or other OS-level Alt behaviour.
+      if (e.key === 'Alt' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const { activeTool } = useEditorStore.getState()
+        if (activeTool === 'clone-stamp') e.preventDefault()
+      }
+
       // ── While Fabric IText is in edit mode: only intercept Escape ────────────
       if (fc?.getActiveObject()?.isEditing) {
         if (key === 'escape') {

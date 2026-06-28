@@ -31,6 +31,9 @@ export function useFileOpen() {
       }
       if (!fc) return
       fc.setWidth(w); fc.setHeight(h)
+      // Reset Fabric's internal viewport to identity so getViewportPoint()
+      // returns correct canvas-pixel coordinates unaffected by any stale zoom.
+      fc.setViewportTransform([1, 0, 0, 1, 0, 0])
       fc.clear()
       try {
         // data: URIs do not require crossOrigin — omit to avoid unnecessary CORS implications

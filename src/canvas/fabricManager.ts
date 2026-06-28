@@ -15,6 +15,22 @@ export function setLayerIdGetter(fn: () => string | null) {
 }
 
 /**
+ * When true the event bridge is silenced — object:modified and path:created
+ * will NOT push to history. Use this to wrap internal operations (like
+ * reloadCanvasAsImage, sendObjectToBack, etc.) so they don't create spurious
+ * duplicate history entries on top of the explicit pushHistory calls.
+ */
+let _suppressBridge = false
+
+export function setSuppressHistoryBridge(suppress: boolean) {
+  _suppressBridge = suppress
+}
+
+export function isHistoryBridgeSuppressed() {
+  return _suppressBridge
+}
+
+/**
  * Create and configure the Fabric.js canvas singleton.
  * @param {HTMLCanvasElement} canvasEl
  * @param {number} width
@@ -48,16 +64,16 @@ export function initFabric(canvasEl, width, height) {
     }
   })
 
-  // Forward path:created events through the bridge
+  // Forward path:created events through the bridge (suppressed during internal ops)
   fc.on('path:created', (e) => {
-    if (_bridge) {
+    if (_bridge && !_suppressBridge) {
       _bridge('path:created', e)
     }
   })
 
-  // Forward object:modified events through the bridge
+  // Forward object:modified events through the bridge (suppressed during internal ops)
   fc.on('object:modified', (e) => {
-    if (_bridge) {
+    if (_bridge && !_suppressBridge) {
       _bridge('object:modified', e)
     }
   })

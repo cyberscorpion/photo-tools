@@ -8,6 +8,7 @@ import LayersPanel from '../panels/LayersPanel.jsx'
 import AdjustmentsPanel from '../panels/AdjustmentsPanel.jsx'
 import HistogramPanel from '../panels/HistogramPanel.jsx'
 import HistoryPanel from '../panels/HistoryPanel.jsx'
+import ContourPanel from '../panels/ContourPanel.jsx'
 
 const shellStyle = {
   display: 'grid',
@@ -51,6 +52,7 @@ export default function AppShell() {
       <div style={panelsSidebarStyle}>
         <LayersPanel />
         <AdjustmentsPanel />
+        <ContourPanel />
         <HistogramPanel />
         <HistoryPanel />
       </div>

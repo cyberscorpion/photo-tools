@@ -68,7 +68,7 @@ export const useEditorStore = create((set, get) => ({
   selection: null,
 
   // ── UI panels ───────────────────────────────────────────────────────────────
-  panels: { layers: true, adjustments: true, histogram: false, history: false },
+  panels: { layers: true, adjustments: true, histogram: false, history: false, contour: true },
 
   // ── Welcome screen ──────────────────────────────────────────────────────────
   showWelcome: true,

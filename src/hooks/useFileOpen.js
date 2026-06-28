@@ -6,7 +6,7 @@ import { FabricImage } from 'fabric'
 
 export function useFileOpen() {
   const fileInputRef = useRef(null)
-  const { setFileName, setImageSize, addLayer, setActiveLayer, setShowWelcome, pushHistory } = useEditorStore()
+  const { setFileName, setImageSize, setHasImage, addLayer, setActiveLayer, setShowWelcome, pushHistory } = useEditorStore()
 
   const openFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return
@@ -34,6 +34,7 @@ export function useFileOpen() {
         fc.renderAll()
         setFileName(file.name)
         setImageSize({ w, h })
+        setHasImage(true)
         setShowWelcome(false)
         addLayer('Background')
         const layers = useEditorStore.getState().layers
@@ -45,7 +46,7 @@ export function useFileOpen() {
       }
     }
     img.src = dataURL
-  }, [setFileName, setImageSize, addLayer, setActiveLayer, setShowWelcome, pushHistory])
+  }, [setFileName, setImageSize, setHasImage, addLayer, setActiveLayer, setShowWelcome, pushHistory])
 
   return { openFile, fileInputRef }
 }

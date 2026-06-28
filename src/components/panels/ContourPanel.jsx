@@ -225,7 +225,7 @@ export default function ContourPanel() {
       </div>
 
       <SliderRow
-        label="Smoothness"
+        label="Corner Radius"
         value={smoothness}
         min={0}
         max={100}
@@ -233,7 +233,7 @@ export default function ContourPanel() {
       />
       <div style={{ padding: '1px 10px 4px 82px' }}>
         <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          Round the corners of the contour
+          Round path corners — straight edges stay sharp
         </span>
       </div>
 

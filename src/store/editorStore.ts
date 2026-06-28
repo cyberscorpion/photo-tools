@@ -95,6 +95,20 @@ export const useEditorStore = create((set, get) => ({
     text: { font: 'Arial', size: 24, color: '#000000', bold: false, italic: false },
     rect: { fill: '#ff0000', stroke: 'transparent', strokeWidth: 0 },
     ellipse: { fill: '#0000ff', stroke: 'transparent', strokeWidth: 0 },
+    'marquee-rect':    { feather: 0, mode: 'new' },
+    'marquee-ellipse': { feather: 0, mode: 'new' },
+    'magic-wand':      { tolerance: 32, contiguous: true },
+    'lasso-poly':      {},
+    line:              { stroke: '#000000', strokeWidth: 2 },
+    'rounded-rect':    { fill: '#ff0000', stroke: 'transparent', strokeWidth: 0, radius: 10 },
+    polygon:           { fill: '#ff0000', stroke: 'transparent', strokeWidth: 0, sides: 6 },
+    'paint-bucket':    { tolerance: 32, contiguous: true },
+    gradient:          { type: 'linear', opacity: 100 },
+    'clone-stamp':     { size: 30, opacity: 100, aligned: true },
+    dodge:             { size: 30, exposure: 50 },
+    burn:              { size: 30, exposure: 50 },
+    'blur-brush':      { size: 30, strength: 50 },
+    pen:               { stroke: '#000000', strokeWidth: 2, fill: 'transparent' },
   },
 
   // ── Colors ──────────────────────────────────────────────────────────────────
@@ -124,6 +138,7 @@ export const useEditorStore = create((set, get) => ({
   // ── Welcome screen ──────────────────────────────────────────────────────────
   showWelcome: true,
   cropMode: false,
+  activeSelection: null as any,
 
   // ── Tabs ────────────────────────────────────────────────────────────────────
   tabs: [{ id: _initialTabId, name: 'Untitled' }],
@@ -366,6 +381,8 @@ export const useEditorStore = create((set, get) => ({
     }),
 
   setCropMode: (bool) => set({ cropMode: bool }),
+  setActiveSelection: (sel: any) => set({ activeSelection: sel }),
+  clearSelection: () => set({ activeSelection: null }),
 
   // ── Tab actions ──────────────────────────────────────────────────────────────
 

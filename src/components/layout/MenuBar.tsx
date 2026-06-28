@@ -154,6 +154,7 @@ export default function MenuBar() {
   const zoom = useEditorStore((s) => s.zoom)
   const openFile = useEditorStore((s) => s.openFile)
   const setFileName = useEditorStore((s) => s.setFileName)
+  const addLayer   = useEditorStore((s) => s.addLayer)
   const setImageSize = useEditorStore((s) => s.setImageSize)
   const pushHistory = useEditorStore((s) => s.pushHistory)
 
@@ -304,11 +305,52 @@ export default function MenuBar() {
     applyZoom(1.0)
   }, [applyZoom])
 
+  // ── Import image as a new layer ──────────────────────────────────────────────
+  const importInputRef = React.useRef<HTMLInputElement>(null)
+
+  const handleImportImage = useCallback(() => {
+    importInputRef.current?.click()
+  }, [])
+
+  const handleImportFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = (evt) => {
+        const dataURL = evt.target?.result as string
+        const fc = getFabric()
+        if (!fc) return
+        import('fabric').then(({ FabricImage }) => {
+          FabricImage.fromURL(dataURL).then((fabricImg) => {
+            // Centre the imported image on the canvas
+            fabricImg.set({
+              left: (fc.width! - (fabricImg.width ?? 0)) / 2,
+              top:  (fc.height! - (fabricImg.height ?? 0)) / 2,
+              selectable: true,
+              evented: true,
+            } as any)
+            fc.add(fabricImg)
+            fc.setActiveObject(fabricImg)
+            fc.renderAll()
+            addLayer(file.name.replace(/\.[^.]+$/, ''))
+            pushHistory('Import Layer', fc.toJSON(['customId', 'layerId']))
+          })
+        })
+      }
+      reader.readAsDataURL(file)
+      e.target.value = ''
+    },
+    [addLayer, pushHistory]
+  )
+
   const menus = [
     {
       label: 'File',
       items: [
         { label: 'Open Image...', action: handleOpenImage },
+        { label: 'Import as Layer...', action: handleImportImage },
+        { label: '──' },
         { label: 'Export As...', action: () => setShowExport(true) },
         { label: 'Copy to Clipboard', action: handleCopyToClipboard },
         { label: '──' },
@@ -392,6 +434,13 @@ export default function MenuBar() {
           accept="image/*"
           style={{ display: 'none' }}
           onChange={handleFileChange}
+        />
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={handleImportFileChange}
         />
       </div>
       {showExport && (

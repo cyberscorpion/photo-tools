@@ -129,32 +129,161 @@ export function floodFill(
   }
 }
 
-/** Apply a solid color fill to pixels covered by the mask */
+/** Apply a solid color fill to pixels covered by the mask.
+ *  Accepts a binary Uint8Array (0/1) or a Float32Array (0.0–1.0) for feathered edges. */
 export function applyMaskFill(
   ctx: CanvasRenderingContext2D,
-  mask: Uint8Array,
+  mask: Uint8Array | Float32Array,
   w: number, h: number,
   r: number, g: number, b: number, a: number
 ): void {
   const imgData = ctx.getImageData(0, 0, w, h)
+  const d = imgData.data
   for (let i = 0; i < w * h; i++) {
-    if (mask[i]) {
-      imgData.data[i*4]   = r
-      imgData.data[i*4+1] = g
-      imgData.data[i*4+2] = b
-      imgData.data[i*4+3] = a
+    const weight = mask[i]
+    if (!weight) continue
+    const p = i * 4
+    if (weight >= 1) {
+      d[p] = r; d[p+1] = g; d[p+2] = b; d[p+3] = a
+    } else {
+      // Alpha-blend fill color over existing pixel according to feather weight
+      d[p]   = Math.round(d[p]   * (1 - weight) + r * weight)
+      d[p+1] = Math.round(d[p+1] * (1 - weight) + g * weight)
+      d[p+2] = Math.round(d[p+2] * (1 - weight) + b * weight)
+      d[p+3] = Math.round(d[p+3] * (1 - weight) + a * weight)
     }
   }
   ctx.putImageData(imgData, 0, 0)
 }
 
-/** Apply destination-out (erase) to pixels covered by the mask */
-export function applyMaskErase(ctx: CanvasRenderingContext2D, mask: Uint8Array, w: number, h: number): void {
+/** Apply destination-out (erase) to pixels covered by the mask.
+ *  Accepts a binary Uint8Array (0/1) or a Float32Array (0.0–1.0) for feathered edges. */
+export function applyMaskErase(
+  ctx: CanvasRenderingContext2D,
+  mask: Uint8Array | Float32Array,
+  w: number, h: number
+): void {
   const imgData = ctx.getImageData(0, 0, w, h)
+  const d = imgData.data
   for (let i = 0; i < w * h; i++) {
-    if (mask[i]) imgData.data[i*4+3] = 0
+    const weight = mask[i]
+    if (!weight) continue
+    d[i*4+3] = Math.round(d[i*4+3] * (1 - weight))
   }
   ctx.putImageData(imgData, 0, 0)
+}
+
+/**
+ * Apply Gaussian feathering to a binary selection mask.
+ * Returns a Float32Array (0.0–1.0) with smooth falloff at selection edges.
+ * Uses three box-blur passes to efficiently approximate a Gaussian.
+ */
+export function applyFeather(
+  mask: Uint8Array,
+  w: number, h: number,
+  radius: number
+): Float32Array {
+  // Start with float copy of binary mask
+  let buf = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) buf[i] = mask[i]
+  if (radius <= 0) return buf
+
+  const halfBox = Math.max(1, Math.round(radius))
+
+  // Single-axis box blur helper (horizontal)
+  const blurH = (src: Float32Array, dst: Float32Array) => {
+    for (let y = 0; y < h; y++) {
+      const base = y * w
+      let sum = 0
+      // Prime window
+      for (let k = 0; k <= halfBox && k < w; k++) sum += src[base + k]
+      for (let x = 0; x < w; x++) {
+        const lo = Math.max(0, x - halfBox)
+        const hi = Math.min(w - 1, x + halfBox)
+        dst[base + x] = sum / (hi - lo + 1)
+        if (x - halfBox >= 0) sum -= src[base + x - halfBox]
+        if (x + halfBox + 1 < w) sum += src[base + x + halfBox + 1]
+      }
+    }
+  }
+
+  // Single-axis box blur helper (vertical)
+  const blurV = (src: Float32Array, dst: Float32Array) => {
+    for (let x = 0; x < w; x++) {
+      let sum = 0
+      for (let k = 0; k <= halfBox && k < h; k++) sum += src[k * w + x]
+      for (let y = 0; y < h; y++) {
+        const lo = Math.max(0, y - halfBox)
+        const hi = Math.min(h - 1, y + halfBox)
+        dst[y * w + x] = sum / (hi - lo + 1)
+        if (y - halfBox >= 0) sum -= src[(y - halfBox) * w + x]
+        if (y + halfBox + 1 < h) sum += src[(y + halfBox + 1) * w + x]
+      }
+    }
+  }
+
+  // 3 box-blur passes (horizontal + vertical each) ≈ Gaussian
+  let tmp = new Float32Array(w * h)
+  for (let pass = 0; pass < 3; pass++) {
+    blurH(buf, tmp)
+    const swap = buf; buf = new Float32Array(w * h); blurV(tmp, buf)
+    void swap // suppress unused warning
+  }
+
+  return buf
+}
+
+/**
+ * Trace the pixel-edge boundary of a binary mask and return an SVG path string.
+ * The path consists of merged horizontal and vertical grid-edge segments,
+ * suitable for use as marching-ants selection overlay.
+ */
+export function maskToOutlinePath(
+  mask: Uint8Array,
+  w: number, h: number,
+  bounds?: { x: number; y: number; w: number; h: number }
+): string {
+  const bx = bounds?.x ?? 0
+  const by = bounds?.y ?? 0
+  const bw = bounds ? bounds.w : w
+  const bh = bounds ? bounds.h : h
+
+  const get = (x: number, y: number): number => {
+    if (x < 0 || x >= w || y < 0 || y >= h) return 0
+    return mask[y * w + x]
+  }
+
+  const parts: string[] = []
+
+  // Horizontal boundary edges (between row Y-1 and row Y)
+  for (let Y = by; Y <= by + bh; Y++) {
+    let runStart = -1
+    for (let x = bx; x < bx + bw; x++) {
+      const isEdge = get(x, Y - 1) !== get(x, Y)
+      if (isEdge) {
+        if (runStart === -1) runStart = x
+      } else {
+        if (runStart !== -1) { parts.push(`M${runStart} ${Y} L${x} ${Y}`); runStart = -1 }
+      }
+    }
+    if (runStart !== -1) parts.push(`M${runStart} ${Y} L${bx + bw} ${Y}`)
+  }
+
+  // Vertical boundary edges (between column X-1 and column X)
+  for (let X = bx; X <= bx + bw; X++) {
+    let runStart = -1
+    for (let y = by; y < by + bh; y++) {
+      const isEdge = get(X - 1, y) !== get(X, y)
+      if (isEdge) {
+        if (runStart === -1) runStart = y
+      } else {
+        if (runStart !== -1) { parts.push(`M${X} ${runStart} L${X} ${y}`); runStart = -1 }
+      }
+    }
+    if (runStart !== -1) parts.push(`M${X} ${runStart} L${X} ${by + bh}`)
+  }
+
+  return parts.length ? parts.join(' ') : `M${bx} ${by} L${bx + bw} ${by} L${bx + bw} ${by + bh} L${bx} ${by + bh} Z`
 }
 
 /** Sample a circular region of ImageData (returns a copy) */

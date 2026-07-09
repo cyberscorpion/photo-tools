@@ -1,5 +1,18 @@
 import { getFabric } from './fabricManager.js'
 
+/** Temporarily hide all selection-overlay objects, run `fn`, then restore. */
+function withoutSelectionOverlay<T>(fc: any, fn: () => T): T {
+  const overlays = (fc.getObjects() as any[]).filter(o => o.layerId === 'selection')
+  overlays.forEach(o => { o.visible = false })
+  fc.renderAll()
+  try {
+    return fn()
+  } finally {
+    overlays.forEach(o => { o.visible = true })
+    fc.renderAll()
+  }
+}
+
 /**
  * Download the current canvas as an image file.
  *
@@ -11,11 +24,13 @@ export function downloadImage(format = 'png', quality = 92, fileName = 'export')
   const fc = getFabric()
   if (!fc) throw new Error('Fabric canvas is not initialised.')
 
-  const dataURL = fc.toDataURL({
-    format,
-    quality: quality / 100,
-    multiplier: 1,
-  })
+  const dataURL = withoutSelectionOverlay(fc, () =>
+    fc.toDataURL({
+      format,
+      quality: quality / 100,
+      multiplier: 1,
+    })
+  )
 
   const ext = format === 'jpeg' ? 'jpg' : format
   // Sanitize fileName: allow only alphanumerics, hyphens, underscores, and dots
@@ -48,10 +63,16 @@ export function copyToClipboard() {
   }
 
   return new Promise((resolve, reject) => {
-    // Access the lower canvas element (the one that renders the scene)
-    const canvasEl = fc.getElement()
+    // Hide selection overlay, capture blob, then restore
+    const overlays = (fc.getObjects() as any[]).filter(o => o.layerId === 'selection')
+    overlays.forEach(o => { o.visible = false })
+    fc.renderAll()
 
+    const canvasEl = fc.getElement()
     canvasEl.toBlob((blob) => {
+      overlays.forEach(o => { o.visible = true })
+      fc.renderAll()
+
       if (!blob) {
         reject(new Error('Failed to create blob from canvas.'))
         return

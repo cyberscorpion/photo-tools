@@ -1,4 +1,4 @@
-import { MousePointer2, Crop, Paintbrush, Eraser, Type, Square, Circle, Hand, ZoomIn, Pipette, Lasso, RectangleHorizontal, CircleEllipsis, Wand2, Pentagon, Minus, RectangleEllipsis, Hexagon, PaintBucket, Blend, Stamp, Sun, Flame, Droplets, PenTool } from 'lucide-react'
+import { MousePointer2, Crop, Paintbrush, Eraser, Type, Square, Circle, Hand, ZoomIn, Pipette, Lasso, RectangleHorizontal, CircleEllipsis, WandSparkles, Pentagon, Minus, RectangleEllipsis, Hexagon, PaintBucket, Blend, Stamp, Sun, Flame, Droplets, PenTool } from 'lucide-react'
 
 export default [
   { id: 'select', icon: MousePointer2, label: 'Select / Move', shortcut: 'V' },
@@ -14,7 +14,7 @@ export default [
   { id: 'lasso', icon: Lasso, label: 'Lasso', shortcut: 'L' },
   { id: 'marquee-rect',    icon: RectangleHorizontal, label: 'Rectangular Marquee', shortcut: 'M' },
   { id: 'marquee-ellipse', icon: CircleEllipsis,      label: 'Elliptical Marquee',  shortcut: 'M' },
-  { id: 'magic-wand',      icon: Wand2,               label: 'Magic Wand',          shortcut: 'W' },
+  { id: 'magic-wand',      icon: WandSparkles,        label: 'Magic Wand',          shortcut: 'W' },
   { id: 'lasso-poly',      icon: Pentagon,            label: 'Polygonal Lasso',     shortcut: 'L' },
   { id: 'line',            icon: Minus,               label: 'Line',                shortcut: 'U' },
   { id: 'rounded-rect',    icon: RectangleEllipsis,   label: 'Rounded Rectangle',   shortcut: 'U' },

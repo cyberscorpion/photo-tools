@@ -4,7 +4,7 @@ import { getFabric, setSuppressHistoryBridge } from './fabricManager.js'
 import { panContainer } from './viewportManager.js'
 import { useEditorStore } from '../store/editorStore.js'
 import { showSelectionRect, showSelectionEllipse, showSelectionPath, clearSelectionOverlay } from './selectionOverlay.ts'
-import { floodFill, applyMaskFill, hexToRgbArr, getLowerCtx, getLowerCanvasEl, reloadCanvasAsImage, sampleCircle, boxBlur } from '../utils/canvasOps.ts'
+import { floodFill, applyMaskFill, applyMaskErase, applyFeather, maskToOutlinePath, hexToRgbArr, getLowerCtx, getLowerCanvasEl, reloadCanvasAsImage, sampleCircle, boxBlur } from '../utils/canvasOps.ts'
 
 // ── Internal state ────────────────────────────────────────────────────────────
 
@@ -1091,11 +1091,19 @@ function activateMagicWand(fc: any, toolOptions: any) {
     const ctx = getLowerCtx(); if (!ctx) return
     const w = fc.width!, h = fc.height!
     const imgData = ctx.getImageData(0, 0, w, h)
-    const opts = toolOptions['magic-wand'] ?? { tolerance: 32, contiguous: true }
-    const { mask, bounds } = floodFill(imgData.data, w, h, Math.round(p.x), Math.round(p.y), opts.tolerance, opts.contiguous)
-    useEditorStore.getState().setActiveSelection({ type: 'wand', bounds, mask })
-    // Simple rect overlay showing the bounding box
-    showSelectionRect(bounds)
+    const opts = toolOptions['magic-wand'] ?? { tolerance: 32, contiguous: true, feather: 0 }
+    const { mask, bounds } = floodFill(imgData.data, w, h, Math.round(p.x), Math.round(p.y), opts.tolerance ?? 32, opts.contiguous ?? true)
+
+    const featherRadius = opts.feather ?? 0
+    const featheredMask: Float32Array | null = featherRadius > 0
+      ? applyFeather(mask, w, h, featherRadius)
+      : null
+
+    useEditorStore.getState().setActiveSelection({ type: 'wand', bounds, mask, featheredMask })
+
+    // Show pixel-precise marching-ants outline
+    const pathStr = maskToOutlinePath(mask, w, h, bounds)
+    showSelectionPath(pathStr)
   }
   fc.on('mouse:down', onMouseDown)
   return () => {
@@ -1540,9 +1548,23 @@ function activatePaintBucket(fc: any, toolOptions: any, storeActions: any) {
   fc.isDrawingMode = false; fc.selection = false; fc.defaultCursor = 'crosshair'
 
   const onMouseDown = async (e: any) => {
-    const p = getPointer(fc, e)
     const ctx = getLowerCtx(); if (!ctx) return
     const w = fc.width!, h = fc.height!
+
+    // If there is an active wand/lasso selection with a pixel mask, fill that region
+    const activeSel = useEditorStore.getState().activeSelection
+    const activeMask = activeSel?.featheredMask ?? activeSel?.mask
+    if (activeMask) {
+      const fg = useEditorStore.getState().foregroundColor ?? '#000000'
+      const [r, g, b] = hexToRgbArr(fg)
+      applyMaskFill(ctx, activeMask, w, h, r, g, b, 255)
+      await reloadCanvasAsImage()
+      useEditorStore.getState().pushHistory('Paint Bucket', fc.toJSON(['customId','layerId']))
+      return
+    }
+
+    // No active selection — standard flood-fill from click point
+    const p = getPointer(fc, e)
     const imgData = ctx.getImageData(0, 0, w, h)
     const opts = toolOptions['paint-bucket'] ?? { tolerance: 32, contiguous: true }
     const { mask } = floodFill(imgData.data, w, h, Math.round(p.x), Math.round(p.y), opts.tolerance, opts.contiguous)

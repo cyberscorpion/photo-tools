@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useEditorStore } from '../store/editorStore.js'
 import { getFabric } from '../canvas/fabricManager.js'
 import { confirmCrop, cancelCrop } from '../canvas/toolHandlers.js'
-import { getLowerCtx, reloadCanvasAsImage } from '../utils/canvasOps.js'
+import { getLowerCtx, reloadCanvasAsImage, applyMaskErase } from '../utils/canvasOps.js'
 
 const TOOL_SHORTCUTS = {
   v: 'select', b: 'brush', e: 'eraser', t: 'text',
@@ -285,8 +285,32 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Delete / Backspace: remove selected objects
+      // Delete / Backspace: erase active pixel selection, or remove selected Fabric objects
       if (key === 'delete' || key === 'backspace') {
+        const { activeSelection } = useEditorStore.getState()
+        if (activeSelection) {
+          e.preventDefault()
+          const ctx = getLowerCtx()
+          if (fc && ctx) {
+            const w = fc.width!, h = fc.height!
+            const activeMask = activeSelection.featheredMask ?? activeSelection.mask
+            if (activeMask) {
+              applyMaskErase(ctx, activeMask, w, h)
+            } else {
+              const { x, y, w: bw, h: bh } = activeSelection.bounds
+              ctx.save()
+              ctx.globalCompositeOperation = 'destination-out'
+              ctx.fillStyle = 'rgba(0,0,0,1)'
+              ctx.fillRect(x, y, bw, bh)
+              ctx.restore()
+            }
+            reloadCanvasAsImage().then(() => {
+              useEditorStore.getState().pushHistory('Delete Selection', fc.toJSON(['customId', 'layerId']))
+            })
+          }
+          return
+        }
+        // No pixel selection — remove selected Fabric objects
         const obj = fc?.getActiveObject()
         if (obj && !obj.isEditing) {
           fc.getActiveObjects().forEach((o) => fc.remove(o))

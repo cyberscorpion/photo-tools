@@ -65,42 +65,71 @@ export default function OptionsBar() {
   const fillFG = async () => {
     const ctx = getLowerCtx()
     if (!ctx || !activeSelection) return
-    const { x, y, w, h } = activeSelection
-    const [r, g, b] = hexToRgbArr(foregroundColor)
-    ctx.save()
-    ctx.fillStyle = `rgba(${r},${g},${b},1)`
-    ctx.fillRect(x, y, w, h)
-    ctx.restore()
+    const fc = getFabric() as any
+    const canvasW = fc?.width ?? 0, canvasH = fc?.height ?? 0
+    const activeMask = activeSelection.featheredMask ?? activeSelection.mask
+    if (activeMask && canvasW && canvasH) {
+      const [r, g, b] = hexToRgbArr(foregroundColor)
+      applyMaskFill(ctx, activeMask, canvasW, canvasH, r, g, b, 255)
+    } else {
+      const { x, y, w, h } = activeSelection.bounds
+      const [r, g, b] = hexToRgbArr(foregroundColor)
+      ctx.save()
+      ctx.fillStyle = `rgba(${r},${g},${b},1)`
+      ctx.fillRect(x, y, w, h)
+      ctx.restore()
+    }
     await reloadCanvasAsImage()
+    const fc2 = getFabric() as any
+    if (fc2) useEditorStore.getState().pushHistory('Fill FG', fc2.toJSON(['customId','layerId']))
   }
 
   const fillBG = async () => {
     const ctx = getLowerCtx()
     if (!ctx || !activeSelection) return
+    const fc = getFabric() as any
+    const canvasW = fc?.width ?? 0, canvasH = fc?.height ?? 0
     const bgColor = useEditorStore.getState().backgroundColor ?? '#ffffff'
-    const { x, y, w, h } = activeSelection
-    const [r, g, b] = hexToRgbArr(bgColor)
-    ctx.save()
-    ctx.fillStyle = `rgba(${r},${g},${b},1)`
-    ctx.fillRect(x, y, w, h)
-    ctx.restore()
+    const activeMask = activeSelection.featheredMask ?? activeSelection.mask
+    if (activeMask && canvasW && canvasH) {
+      const [r, g, b] = hexToRgbArr(bgColor)
+      applyMaskFill(ctx, activeMask, canvasW, canvasH, r, g, b, 255)
+    } else {
+      const { x, y, w, h } = activeSelection.bounds
+      const [r, g, b] = hexToRgbArr(bgColor)
+      ctx.save()
+      ctx.fillStyle = `rgba(${r},${g},${b},1)`
+      ctx.fillRect(x, y, w, h)
+      ctx.restore()
+    }
     await reloadCanvasAsImage()
+    const fc2 = getFabric() as any
+    if (fc2) useEditorStore.getState().pushHistory('Fill BG', fc2.toJSON(['customId','layerId']))
   }
 
   const deleteSelection = async () => {
     const ctx = getLowerCtx()
     if (!ctx || !activeSelection) return
-    const { x, y, w, h } = activeSelection
-    ctx.save()
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.fillStyle = 'rgba(0,0,0,1)'
-    ctx.fillRect(x, y, w, h)
-    ctx.restore()
+    const fc = getFabric() as any
+    const canvasW = fc?.width ?? 0, canvasH = fc?.height ?? 0
+    const activeMask = activeSelection.featheredMask ?? activeSelection.mask
+    if (activeMask && canvasW && canvasH) {
+      applyMaskErase(ctx, activeMask, canvasW, canvasH)
+    } else {
+      const { x, y, w, h } = activeSelection.bounds
+      ctx.save()
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.fillStyle = 'rgba(0,0,0,1)'
+      ctx.fillRect(x, y, w, h)
+      ctx.restore()
+    }
     await reloadCanvasAsImage()
+    const fc2 = getFabric() as any
+    if (fc2) useEditorStore.getState().pushHistory('Delete Selection', fc2.toJSON(['customId','layerId']))
   }
 
-  // Selection action bar — shown whenever there is an active selection
-  if (activeSelection) {
+  // Selection action bar — shown for non-wand tools when there is an active selection
+  if (activeSelection && activeTool !== 'magic-wand') {
     return (
       <div style={{ ...barStyle, gap: 8 }}>
         <span style={labelStyle}>Selection active</span>
@@ -167,14 +196,37 @@ export default function OptionsBar() {
   }
 
   if (activeTool === 'magic-wand') {
-    const opts = toolOptions['magic-wand'] ?? { tolerance: 32 }
+    const opts = toolOptions['magic-wand'] ?? { tolerance: 32, contiguous: true, feather: 0 }
     return (
       <div style={barStyle}>
         <span style={labelStyle}>Tolerance</span>
         <input type="range" min={0} max={255} value={opts.tolerance}
           onChange={e => setToolOption('magic-wand', 'tolerance', +e.target.value)} style={{ width: 80 }} />
         <span style={labelStyle}>{opts.tolerance}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: add to selection</span>
+        <span style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+        <button
+          style={toggleBtnStyle(opts.contiguous ?? true)}
+          onClick={() => setToolOption('magic-wand', 'contiguous', !(opts.contiguous ?? true))}
+        >
+          Contiguous
+        </button>
+        <span style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+        <span style={labelStyle}>Feather</span>
+        <input type="range" min={0} max={50} value={opts.feather ?? 0}
+          onChange={e => setToolOption('magic-wand', 'feather', +e.target.value)} style={{ width: 70 }} />
+        <span style={labelStyle}>{opts.feather ?? 0}px</span>
+        {activeSelection && (
+          <>
+            <span style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+            <button onClick={fillFG} style={actionBtnStyle}>Fill FG</button>
+            <button onClick={fillBG} style={actionBtnStyle}>Fill BG</button>
+            <button onClick={deleteSelection} style={{ ...actionBtnStyle, color: '#e74c3c' }}>Delete</button>
+            <button onClick={clearSelection} style={actionBtnStyle}>Deselect</button>
+          </>
+        )}
+        {!activeSelection && (
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Click to select • Delete to erase • Fill FG/BG to fill</span>
+        )}
       </div>
     )
   }

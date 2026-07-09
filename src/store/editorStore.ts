@@ -97,7 +97,7 @@ export const useEditorStore = create((set, get) => ({
     ellipse: { fill: '#0000ff', stroke: 'transparent', strokeWidth: 0 },
     'marquee-rect':    { feather: 0, mode: 'new' },
     'marquee-ellipse': { feather: 0, mode: 'new' },
-    'magic-wand':      { tolerance: 32, contiguous: true },
+    'magic-wand':      { tolerance: 32, contiguous: true, feather: 0 },
     'lasso-poly':      {},
     line:              { stroke: '#000000', strokeWidth: 2 },
     'rounded-rect':    { fill: '#ff0000', stroke: 'transparent', strokeWidth: 0, radius: 10 },

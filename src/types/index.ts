@@ -65,6 +65,8 @@ export interface ActiveSelection {
   type: 'rect' | 'ellipse' | 'lasso' | 'wand'
   bounds: { x: number; y: number; w: number; h: number }
   mask?: Uint8Array | null
+  /** Gaussian-feathered float mask (0.0–1.0); present when feather > 0 */
+  featheredMask?: Float32Array | null
 }
 
 // ─── Tools ───────────────────────────────────────────────────────────────────

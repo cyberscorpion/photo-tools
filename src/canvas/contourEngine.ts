@@ -318,6 +318,34 @@ export async function exportContourAsPNG(offset, thickness, color, smoothness = 
   triggerDownload(url, `${fileName.replace(/\.[^.]+$/, '')}-contour.png`)
 }
 
+export async function exportContourAsJPEG(offset, thickness, color, smoothness = 0, fileName = 'contour', quality = 0.92) {
+  const imgObj = getBaseImageObject()
+  if (!imgObj) return
+  const el = imgObj._element || imgObj.getElement?.()
+  if (!el) return
+
+  const { data, w, h } = getImagePixels(el)
+  const originalMask  = extractAlphaMask(data, w, h)
+  const pad           = Math.ceil(offset + thickness)
+  const cornerRadius  = (smoothness / 100) * 40
+  const roundedMask   = roundMaskCorners(originalMask, w, h, cornerRadius)
+  const { paddedMask: paddedRounded,  PW, PH } = buildPaddedMask(roundedMask,  w, h, pad)
+  const { paddedMask: paddedOriginal }          = buildPaddedMask(originalMask, w, h, pad)
+  const dt    = edt2D(paddedRounded, PW, PH)
+  const iData = buildContourImageData(paddedOriginal, dt, PW, PH, offset, thickness, color, 1)
+
+  const c = createCanvas(PW, PH)
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, PW, PH)
+  ctx.putImageData(iData, 0, 0)
+
+  const jpegQuality = Math.min(1, Math.max(0, quality))
+  const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', jpegQuality))
+  const url  = URL.createObjectURL(blob)
+  triggerDownload(url, `${fileName.replace(/\.[^.]+$/, '')}-contour.jpg`)
+}
+
 export async function exportContourAsSVG(offset, thickness, color, smoothness = 0, fileName = 'contour') {
   const imgObj = getBaseImageObject()
   if (!imgObj) return

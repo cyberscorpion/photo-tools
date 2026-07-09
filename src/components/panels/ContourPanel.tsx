@@ -4,6 +4,7 @@ import {
   renderContour,
   removeContourFromCanvas,
   exportContourAsPNG,
+  exportContourAsJPEG,
   exportContourAsSVG,
 } from '../../canvas/contourEngine.js'
 import PanelContainer from './PanelContainer.jsx'
@@ -55,7 +56,7 @@ const sectionLabelStyle = {
   marginTop: 2,
 }
 
-function ToggleBtn({ active, danger, disabled, onClick, children }) {
+function ToggleBtn({ active = false, danger = false, disabled = false, onClick, children }) {
   return (
     <button
       onClick={onClick}
@@ -180,6 +181,8 @@ export default function ContourPanel() {
 
   const handleExportPNG = () =>
     exportContourAsPNG(offset, thickness, color, smoothness, fileName || 'photo-tools')
+  const handleExportJPEG = () =>
+    exportContourAsJPEG(offset, thickness, color, smoothness, fileName || 'photo-tools')
   const handleExportSVG = () =>
     exportContourAsSVG(offset, thickness, color, smoothness, fileName || 'photo-tools')
 
@@ -293,6 +296,18 @@ export default function ContourPanel() {
           }}
         >
           Export PNG
+        </button>
+        <button
+          onClick={handleExportJPEG}
+          disabled={!hasImage}
+          title="JPEG export (white background)"
+          style={{
+            flex: 1, padding: '5px 0', borderRadius: 3, fontSize: 11,
+            cursor: hasImage ? 'pointer' : 'not-allowed', opacity: hasImage ? 1 : 0.4,
+            background: 'var(--bg-hover)', color: 'var(--text)', border: '1px solid var(--border)',
+          }}
+        >
+          Export JPG
         </button>
         <button
           onClick={handleExportSVG}

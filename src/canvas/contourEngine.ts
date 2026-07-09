@@ -338,7 +338,12 @@ export async function exportContourAsJPEG(offset, thickness, color, smoothness =
   const ctx = c.getContext('2d')
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, PW, PH)
-  ctx.putImageData(iData, 0, 0)
+
+  // putImageData ignores compositing, so draw onto an intermediate canvas
+  // and composite it over the white background with drawImage.
+  const tmp = createCanvas(PW, PH)
+  tmp.getContext('2d').putImageData(iData, 0, 0)
+  ctx.drawImage(tmp, 0, 0)
 
   const jpegQuality = Math.min(1, Math.max(0, quality))
   const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', jpegQuality))

@@ -84,6 +84,8 @@ export default function WorkspaceArea({ onCursorMove }) {
             position: 'relative',
           }}
         >
+          {/* Checker sits in screen-pixel space so its tile size never changes with zoom */}
+          <CheckerBackground width={canvasW * zoom} height={canvasH * zoom} />
         {/* Canvas wrapper: CSS-scaled for visual zoom.
              top/left are offset by -CANVAS_PAD*zoom so the image (placed at
              Fabric (PAD,PAD)) visually aligns with the phantom-div origin.
@@ -101,7 +103,6 @@ export default function WorkspaceArea({ onCursorMove }) {
               overflow: 'visible',
             }}
           >
-            <CheckerBackground width={canvasW} height={canvasH} offsetX={CANVAS_PAD} offsetY={CANVAS_PAD} zoom={zoom} />
             <CanvasStage />
           </div>
         </div>

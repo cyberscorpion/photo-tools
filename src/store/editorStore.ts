@@ -141,6 +141,7 @@ export const useEditorStore = create((set, get) => ({
   cropShape: 'rect',
   cropRoundedRadius: 20,
   cropPreviewSize: null as { w: number; h: number } | null,
+  cropOverlayBounds: null as { x: number; y: number; w: number; h: number } | null,
   activeSelection: null as any,
 
   // ── Tabs ────────────────────────────────────────────────────────────────────
@@ -387,6 +388,7 @@ export const useEditorStore = create((set, get) => ({
   setCropShape: (shape: string) => set({ cropShape: shape }),
   setCropRoundedRadius: (r: number) => set({ cropRoundedRadius: r }),
   setCropPreviewSize: (size: { w: number; h: number } | null) => set({ cropPreviewSize: size }),
+  setCropOverlayBounds: (b: { x: number; y: number; w: number; h: number } | null) => set({ cropOverlayBounds: b }),
   setActiveSelection: (sel: any) => set({ activeSelection: sel }),
   clearSelection: () => set({ activeSelection: null }),
 

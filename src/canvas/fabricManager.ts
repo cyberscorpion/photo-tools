@@ -6,9 +6,10 @@ import { Canvas } from 'fabric'
  * at the canvas element's pixel boundary; this padding gives them space to render
  * even when the selection or crop rect sits flush against the image edge.
  * WorkspaceArea compensates with a matching CSS offset so the image appears at
- * the same visual position.
+ * the same visual position.  400px gives a comfortable range for expanding the
+ * crop selection well outside the original image boundary.
  */
-export const CANVAS_PAD = 60
+export const CANVAS_PAD = 400
 
 /** @type {Canvas|null} */
 let _canvas = null
@@ -96,6 +97,15 @@ export function initFabric(canvasEl, width, height) {
   })
 
   _canvas = fc
+
+  // Elevate the upper canvas (which draws selection handles and crop controls)
+  // above any HTML/SVG overlays (e.g. the crop fishbowl SVG at z-index 20).
+  // Painting order within the canvas-wrapper stacking context becomes:
+  //   lowerCanvas (z-index: auto) → SVG overlay (z-index: 20) → upperCanvas (z-index: 30)
+  // so the image content is darkened by the SVG but handles always remain fully visible.
+  const uc = (fc as any).upperCanvasEl
+  if (uc instanceof HTMLCanvasElement) uc.style.zIndex = '30'
+
   return fc
 }
 

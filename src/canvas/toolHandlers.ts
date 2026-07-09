@@ -698,23 +698,34 @@ function activateCrop(fc) {
     const cw = fc.width, ch = fc.height
     const cl = Math.max(0, b.left), ct = Math.max(0, b.top)
     const cr = Math.min(cw, b.left + b.width), cb = Math.min(ch, b.top + b.height)
-    const dark = 'rgba(0,0,0,0.45)'
 
-    const strips = [
-      [0,   0,   cw,      ct     ],   // top
-      [0,   cb,  cw,      ch - cb],   // bottom
-      [0,   ct,  cl,      cb - ct],   // left
-      [cr,  ct,  cw - cr, cb - ct],   // right
-    ]
-
-    strips.forEach(([l, t, w, h]) => {
+    // ── Dark strips over image area outside the crop rect ──────────────────────
+    // Strips live on the lowerCanvas; upperCanvas (handles) is always above them.
+    // The CANVAS_PAD transparent border shows the workspace bg (#212121 during crop)
+    // so no strips are needed outside the image boundary.
+    const iL = CANVAS_PAD, iT = CANVAS_PAD
+    const iW = (fc.width  as number) - 2 * CANVAS_PAD
+    const iH = (fc.height as number) - 2 * CANVAS_PAD
+    const iR = iL + iW, iB = iT + iH
+    const cL = Math.max(iL, b.left),          cTop = Math.max(iT, b.top)
+    const cR = Math.min(iR, b.left + b.width), cBot = Math.min(iB, b.top + b.height)
+    const DARK = 'rgba(0,0,0,0.55)'
+    ;[
+      [iL,  iT,   iW,         cTop - iT  ],  // above crop
+      [iL,  cBot, iW,         iB  - cBot ],  // below crop
+      [iL,  cTop, cL  - iL,   cBot - cTop],  // left of crop
+      [cR,  cTop, iR  - cR,   cBot - cTop],  // right of crop
+    ].forEach(([l, t, w, h]) => {
       if (w <= 0 || h <= 0) return
       const strip = new Rect({ left: l, top: t, width: w, height: h,
-        fill: dark, selectable: false, evented: false, layerId: 'crop-overlay' })
-      overlayRects.push(strip)
-      fc.add(strip)
-      fc.sendObjectToBack(strip)
+        fill: DARK, selectable: false, evented: false, layerId: 'crop-overlay' } as any)
+      overlayRects.push(strip); fc.add(strip)
     })
+
+    // ── Keep setCropOverlayBounds for any external consumers ────────────────────
+    ;(useEditorStore.getState() as any).setCropOverlayBounds(
+      { x: b.left, y: b.top, w: b.width, h: b.height }
+    )
 
     // ── Live crop dimensions → StatusBar ─────────────────────────────────────
     const bw = cr - cl, bh = cb - ct
@@ -871,7 +882,8 @@ function activateCrop(fc) {
   const doCancel = () => {
     clearOverlay()
     restoreObjects();
-    (useEditorStore.getState() as any).setCropPreviewSize(null)
+    (useEditorStore.getState() as any).setCropPreviewSize(null);
+    (useEditorStore.getState() as any).setCropOverlayBounds(null)
     useEditorStore.getState().setCropMode(false)
     _cropConfirm = null
     _cropCancel = null

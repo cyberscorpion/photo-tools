@@ -1,17 +1,16 @@
 import React from 'react'
 
-export default function CheckerBackground({ width, height, offsetX = 0, offsetY = 0, zoom = 1 }) {
-  const tileSize = 8 / zoom
+export default function CheckerBackground({ width, height }) {
   return (
     <div
       style={{
         position: 'absolute',
-        left: offsetX,
-        top: offsetY,
+        left: 0,
+        top: 0,
         width: width,
         height: height,
         backgroundImage: 'repeating-conic-gradient(#cccccc 0% 25%, #ffffff 0% 50%)',
-        backgroundSize: `${tileSize}px ${tileSize}px`,
+        backgroundSize: '8px 8px',
         backgroundPosition: '0 0',
         pointerEvents: 'none',
       }}

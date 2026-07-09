@@ -716,8 +716,76 @@ function activateCrop(fc) {
       fc.sendObjectToBack(strip)
     })
 
+    // ── Live crop dimensions → StatusBar ─────────────────────────────────────
+    const bw = cr - cl, bh = cb - ct
+    ;(useEditorStore.getState() as any).setCropPreviewSize({ w: Math.round(bw), h: Math.round(bh) })
+
+    // ── Shape mask preview inside the crop rect ────────────────────────────
+    const { cropShape = 'rect', cropRoundedRadius = 20 } = useEditorStore.getState() as any
+    if (cropShape !== 'rect' && bw > 0 && bh > 0) {
+      const innerPath = buildShapeInnerPath(cl, ct, bw, bh, cropShape, cropRoundedRadius)
+      if (innerPath) {
+        // evenodd path: outer rect punched out by the inner shape = dark corners
+        const outerRect = `M ${cl} ${ct} L ${cr} ${ct} L ${cr} ${cb} L ${cl} ${cb} Z`
+        const shapeOverlay = new Path(outerRect + ' ' + innerPath, {
+          fill: 'rgba(0,0,0,0.42)', fillRule: 'evenodd' as any,
+          stroke: null as any, selectable: false, evented: false, layerId: 'crop-overlay',
+        } as any)
+        overlayRects.push(shapeOverlay)
+        fc.add(shapeOverlay)
+      }
+    }
+
     fc.bringObjectToFront(cropRect)
     fc.renderAll()
+  }
+
+  // ── SVG inner-path generator for each crop shape ─────────────────────────
+  const buildShapeInnerPath = (l: number, t: number, w: number, h: number, shape: string, radius: number): string => {
+    const cx = l + w / 2, cy = t + h / 2, rx = w / 2, ry = h / 2
+    const k = 0.5522847498  // cubic-bezier circle approximation factor
+    switch (shape) {
+      case 'ellipse':
+        return (
+          `M ${cx} ${t}` +
+          ` C ${cx + rx * k} ${t},${l + w} ${cy - ry * k},${l + w} ${cy}` +
+          ` C ${l + w} ${cy + ry * k},${cx + rx * k} ${t + h},${cx} ${t + h}` +
+          ` C ${cx - rx * k} ${t + h},${l} ${cy + ry * k},${l} ${cy}` +
+          ` C ${l} ${cy - ry * k},${cx - rx * k} ${t},${cx} ${t} Z`
+        )
+      case 'rounded-rect': {
+        const r = Math.min(Math.max(radius, 0), Math.min(w, h) / 2)
+        return `M ${l + r} ${t} L ${l + w - r} ${t} Q ${l + w} ${t} ${l + w} ${t + r}` +
+          ` L ${l + w} ${t + h - r} Q ${l + w} ${t + h} ${l + w - r} ${t + h}` +
+          ` L ${l + r} ${t + h} Q ${l} ${t + h} ${l} ${t + h - r}` +
+          ` L ${l} ${t + r} Q ${l} ${t} ${l + r} ${t} Z`
+      }
+      case 'triangle':
+        return `M ${cx} ${t} L ${l + w} ${t + h} L ${l} ${t + h} Z`
+      case 'hexagon': {
+        let pts = ''
+        for (let i = 0; i < 6; i++) {
+          const angle = (i * Math.PI) / 3 - Math.PI / 6
+          const x = cx + rx * Math.cos(angle), y = cy + ry * Math.sin(angle)
+          pts += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`)
+        }
+        return pts + ' Z'
+      }
+      case 'diamond':
+        return `M ${cx} ${t} L ${l + w} ${cy} L ${cx} ${t + h} L ${l} ${cy} Z`
+      case 'star': {
+        const ro = Math.min(rx, ry), ri = ro * 0.38
+        let pts = ''
+        for (let i = 0; i < 10; i++) {
+          const angle = (i * Math.PI) / 5 - Math.PI / 2
+          const r = i % 2 === 0 ? ro : ri
+          const x = cx + r * Math.cos(angle), y = cy + r * Math.sin(angle)
+          pts += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`)
+        }
+        return pts + ' Z'
+      }
+      default: return ''
+    }
   }
 
   // ── Create initial crop rect covering the full canvas ─────────────────────
@@ -800,7 +868,8 @@ function activateCrop(fc) {
 
   const doCancel = () => {
     clearOverlay()
-    restoreObjects()
+    restoreObjects();
+    (useEditorStore.getState() as any).setCropPreviewSize(null)
     useEditorStore.getState().setCropMode(false)
     _cropConfirm = null
     _cropCancel = null
@@ -824,7 +893,65 @@ function activateCrop(fc) {
     const offscreen = document.createElement('canvas')
     offscreen.width  = w
     offscreen.height = h
-    offscreen.getContext('2d').drawImage(srcEl, x, y, w, h, 0, 0, w, h)
+    const offCtx = offscreen.getContext('2d')!
+    offCtx.drawImage(srcEl, x, y, w, h, 0, 0, w, h)
+
+    // Apply shape clip mask (pixels outside shape become transparent)
+    const { cropShape = 'rect', cropRoundedRadius = 20 } = useEditorStore.getState() as any
+    if (cropShape !== 'rect') {
+      offCtx.globalCompositeOperation = 'destination-in'
+      offCtx.fillStyle = '#000'
+      offCtx.beginPath()
+      const cx = w / 2, cy = h / 2
+      switch (cropShape) {
+        case 'ellipse':
+          offCtx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2)
+          break
+        case 'rounded-rect': {
+          const r = Math.min(Math.max(cropRoundedRadius, 0), Math.min(w, h) / 2)
+          if ((offCtx as any).roundRect) {
+            ;(offCtx as any).roundRect(0, 0, w, h, r)
+          } else {
+            offCtx.moveTo(r, 0); offCtx.lineTo(w - r, 0)
+            offCtx.quadraticCurveTo(w, 0, w, r)
+            offCtx.lineTo(w, h - r); offCtx.quadraticCurveTo(w, h, w - r, h)
+            offCtx.lineTo(r, h); offCtx.quadraticCurveTo(0, h, 0, h - r)
+            offCtx.lineTo(0, r); offCtx.quadraticCurveTo(0, 0, r, 0)
+            offCtx.closePath()
+          }
+          break
+        }
+        case 'triangle':
+          offCtx.moveTo(cx, 0); offCtx.lineTo(w, h); offCtx.lineTo(0, h); offCtx.closePath()
+          break
+        case 'hexagon': {
+          for (let i = 0; i < 6; i++) {
+            const angle = (i * Math.PI) / 3 - Math.PI / 6
+            const hx = cx + (w / 2) * Math.cos(angle), hy = cy + (h / 2) * Math.sin(angle)
+            if (i === 0) offCtx.moveTo(hx, hy); else offCtx.lineTo(hx, hy)
+          }
+          offCtx.closePath()
+          break
+        }
+        case 'diamond':
+          offCtx.moveTo(cx, 0); offCtx.lineTo(w, cy); offCtx.lineTo(cx, h); offCtx.lineTo(0, cy); offCtx.closePath()
+          break
+        case 'star': {
+          const ro = Math.min(cx, cy), ri = ro * 0.38
+          for (let i = 0; i < 10; i++) {
+            const angle = (i * Math.PI) / 5 - Math.PI / 2
+            const r = i % 2 === 0 ? ro : ri
+            const sx = cx + r * Math.cos(angle), sy = cy + r * Math.sin(angle)
+            if (i === 0) offCtx.moveTo(sx, sy); else offCtx.lineTo(sx, sy)
+          }
+          offCtx.closePath()
+          break
+        }
+      }
+      offCtx.fill()
+      offCtx.globalCompositeOperation = 'source-over'
+    }
+
     const croppedDataURL = offscreen.toDataURL('image/png')
 
     fc.clear()
@@ -854,7 +981,18 @@ function activateCrop(fc) {
   fc.on('mouse:move', onMouseMove)
   fc.on('mouse:up', onMouseUp)
 
+  // Re-draw overlay when cropShape or cropRoundedRadius changes in the store
+  let _lastShape = (useEditorStore.getState() as any).cropShape
+  let _lastRadius = (useEditorStore.getState() as any).cropRoundedRadius
+  const unsubShape = useEditorStore.subscribe((state: any) => {
+    if (state.cropShape !== _lastShape || state.cropRoundedRadius !== _lastRadius) {
+      _lastShape = state.cropShape; _lastRadius = state.cropRoundedRadius
+      updateOverlay()
+    }
+  })
+
   return () => {
+    unsubShape()
     cropDrawing = false
     fc.off('object:moving',  updateOverlay)
     fc.off('object:scaling', updateOverlay)

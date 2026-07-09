@@ -57,6 +57,10 @@ export default function OptionsBar() {
   const setZoom = useEditorStore((s) => s.setZoom)
   const selection = useEditorStore((s) => s.selection)
   const cropMode = useEditorStore((s) => s.cropMode)
+  const cropShape = useEditorStore((s: any) => s.cropShape ?? 'rect')
+  const cropRoundedRadius = useEditorStore((s: any) => s.cropRoundedRadius ?? 20)
+  const setCropShape = useEditorStore((s: any) => s.setCropShape)
+  const setCropRoundedRadius = useEditorStore((s: any) => s.setCropRoundedRadius)
   const activeSelection = useEditorStore((s) => s.activeSelection)
   const clearSelection = useEditorStore((s) => s.clearSelection)
   const foregroundColor = useEditorStore((s) => s.foregroundColor)
@@ -141,15 +145,49 @@ export default function OptionsBar() {
     )
   }
 
-  // Crop mode active (rect drawn) — show Apply / Cancel
+  // Crop mode active (rect drawn) — show shape picker + Apply / Cancel
   if (cropMode) {
+    const shapes: { id: string; label: string; icon: string }[] = [
+      { id: 'rect',         label: 'Rectangle',        icon: '⬜' },
+      { id: 'ellipse',      label: 'Ellipse',           icon: '⭕' },
+      { id: 'rounded-rect', label: 'Rounded Rect',      icon: '▢' },
+      { id: 'triangle',     label: 'Triangle',          icon: '△' },
+      { id: 'diamond',      label: 'Diamond',           icon: '◇' },
+      { id: 'hexagon',      label: 'Hexagon',           icon: '⬡' },
+      { id: 'star',         label: 'Star',              icon: '★' },
+    ]
+    const btnB: React.CSSProperties = { padding: '2px 6px', fontSize: 13, borderRadius: 3, border: '1px solid var(--border)', cursor: 'pointer', lineHeight: '20px', minWidth: 28, textAlign: 'center' }
+    const btnA: React.CSSProperties = { ...btnB, background: 'var(--accent, #0078d4)', color: '#fff', borderColor: 'var(--accent, #0078d4)' }
+    const btnI: React.CSSProperties = { ...btnB, background: 'var(--bg-input, #2a2a2a)', color: 'var(--text-dim)' }
+    const sep: React.CSSProperties = { width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }
     return (
       <div style={barStyle}>
-        <span style={{ ...labelStyle, marginRight: 8 }}>Drag handles to adjust • Enter to apply • Esc to cancel</span>
+        <span style={{ ...labelStyle, marginRight: 4 }}>Shape</span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {shapes.map(s => (
+            <button key={s.id} title={s.label}
+              style={cropShape === s.id ? btnA : btnI}
+              onClick={() => setCropShape(s.id)}>
+              {s.icon}
+            </button>
+          ))}
+        </div>
+        {cropShape === 'rounded-rect' && (
+          <>
+            <div style={sep} />
+            <span style={labelStyle}>Radius</span>
+            <input type="range" min={0} max={200} value={cropRoundedRadius}
+              onChange={e => setCropRoundedRadius(+e.target.value)}
+              style={{ width: 70 }} />
+            <span style={{ ...labelStyle, minWidth: 26 }}>{cropRoundedRadius}px</span>
+          </>
+        )}
+        <div style={sep} />
+        <span style={{ ...labelStyle, opacity: 0.6, fontSize: 10 }}>Drag handles to adjust • Enter to apply • Esc to cancel</span>
         <button
           onClick={confirmCrop}
           style={{
-            padding: '3px 14px', borderRadius: 3, fontSize: 11, fontWeight: 600,
+            marginLeft: 'auto', padding: '3px 14px', borderRadius: 3, fontSize: 11, fontWeight: 600,
             background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)', cursor: 'pointer',
           }}
         >

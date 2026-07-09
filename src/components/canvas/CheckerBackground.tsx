@@ -7,8 +7,8 @@ export default function CheckerBackground({ width, height }) {
         position: 'absolute',
         width: width,
         height: height,
-        backgroundImage: 'repeating-conic-gradient(#404040 0% 25%, #333333 0% 50%)',
-        backgroundSize: '16px 16px',
+        backgroundImage: 'repeating-conic-gradient(#cccccc 0% 25%, #ffffff 0% 50%)',
+        backgroundSize: '8px 8px',
         backgroundPosition: '0 0',
         pointerEvents: 'none',
       }}

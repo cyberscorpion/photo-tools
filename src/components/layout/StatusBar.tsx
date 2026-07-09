@@ -5,6 +5,7 @@ export default function StatusBar({ cursorX, cursorY }) {
   const zoom = useEditorStore((s) => s.zoom)
   const imageSize = useEditorStore((s) => s.imageSize)
   const fileName = useEditorStore((s) => s.fileName)
+  const cropPreviewSize = useEditorStore((s: any) => s.cropPreviewSize as { w: number; h: number } | null)
 
   const w = imageSize.w || 0
   const h = imageSize.h || 0
@@ -28,11 +29,13 @@ export default function StatusBar({ cursorX, cursorY }) {
     >
       {fileName && <span>{fileName}</span>}
       <span>Zoom: {zoomPct}%</span>
-      {w > 0 && h > 0 && (
-        <span>
-          {w} &times; {h} px
+      {cropPreviewSize ? (
+        <span style={{ color: 'var(--accent, #0078d4)', fontWeight: 500 }}>
+          ✂ {cropPreviewSize.w} &times; {cropPreviewSize.h} px
         </span>
-      )}
+      ) : w > 0 && h > 0 ? (
+        <span>{w} &times; {h} px</span>
+      ) : null}
       {cursorX !== undefined && cursorY !== undefined && (
         <span>
           X: {cursorX} Y: {cursorY}

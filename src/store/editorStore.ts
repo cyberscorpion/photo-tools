@@ -138,6 +138,9 @@ export const useEditorStore = create((set, get) => ({
   // ── Welcome screen ──────────────────────────────────────────────────────────
   showWelcome: true,
   cropMode: false,
+  cropShape: 'rect',
+  cropRoundedRadius: 20,
+  cropPreviewSize: null as { w: number; h: number } | null,
   activeSelection: null as any,
 
   // ── Tabs ────────────────────────────────────────────────────────────────────
@@ -381,6 +384,9 @@ export const useEditorStore = create((set, get) => ({
     }),
 
   setCropMode: (bool) => set({ cropMode: bool }),
+  setCropShape: (shape: string) => set({ cropShape: shape }),
+  setCropRoundedRadius: (r: number) => set({ cropRoundedRadius: r }),
+  setCropPreviewSize: (size: { w: number; h: number } | null) => set({ cropPreviewSize: size }),
   setActiveSelection: (sel: any) => set({ activeSelection: sel }),
   clearSelection: () => set({ activeSelection: null }),
 

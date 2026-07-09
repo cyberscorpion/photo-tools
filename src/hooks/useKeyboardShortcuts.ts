@@ -251,8 +251,10 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Tool shortcuts (disabled during crop mode)
-      if (!cropMode && TOOL_SHORTCUTS[key]) {
+      // Tool shortcuts — if crop is active, cancel it first then switch
+      if (TOOL_SHORTCUTS[key]) {
+        const { cropMode: cm } = useEditorStore.getState()
+        if (cm) { cancelCrop() }
         setActiveTool(TOOL_SHORTCUTS[key])
         return
       }

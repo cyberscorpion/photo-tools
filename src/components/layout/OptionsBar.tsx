@@ -359,15 +359,63 @@ export default function OptionsBar() {
   }
 
   if (activeTool === 'pen') {
-    const opts = toolOptions.pen ?? { stroke: '#000000', strokeWidth: 2, fill: 'transparent' }
+    const opts = toolOptions.pen ?? { stroke: '#000000', strokeWidth: 2, fill: 'transparent', mode: 'path', lineCap: 'butt', lineJoin: 'miter', rubberBand: true }
+    const btnBase: React.CSSProperties = { padding: '2px 7px', fontSize: 11, borderRadius: 3, border: '1px solid var(--border)', cursor: 'pointer', lineHeight: '18px' }
+    const btnActive: React.CSSProperties = { ...btnBase, background: 'var(--accent, #0078d4)', color: '#fff', borderColor: 'var(--accent, #0078d4)' }
+    const btnInactive: React.CSSProperties = { ...btnBase, background: 'var(--bg-input, #2a2a2a)', color: 'var(--text-dim)' }
+    const sep: React.CSSProperties = { width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }
     return (
       <div style={barStyle}>
+        {/* Mode: Path | Shape */}
+        <span style={labelStyle}>Mode</span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          <button style={opts.mode === 'path' ? btnActive : btnInactive} onClick={() => setToolOption('pen', 'mode', 'path')}>Path</button>
+          <button style={opts.mode === 'shape' ? btnActive : btnInactive} onClick={() => setToolOption('pen', 'mode', 'shape')}>Shape</button>
+        </div>
+        <div style={sep} />
+
+        {/* Stroke */}
         <span style={labelStyle}>Stroke</span>
         <input type="color" value={opts.stroke} onChange={e => setToolOption('pen', 'stroke', e.target.value)} style={{ width: 28, height: 22, padding: 1, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', background: 'none' }} />
-        <span style={labelStyle}>Width</span>
-        <input type="number" min={1} max={20} value={opts.strokeWidth} onChange={e => setToolOption('pen', 'strokeWidth', +e.target.value)} style={{ width: 48 }} />
-        <span style={{ ...labelStyle, opacity: 0.6 }}>Click=point • Click first point to close • Enter=finish • Esc=cancel</span>
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>Shift: snap 45° • Enter: finish • Esc: cancel</span>
+        <input type="number" min={1} max={20} value={opts.strokeWidth} onChange={e => setToolOption('pen', 'strokeWidth', +e.target.value)} style={{ width: 40 }} />
+        <div style={sep} />
+
+        {/* Fill (only meaningful in shape mode) */}
+        <span style={labelStyle}>Fill</span>
+        <input type="color" value={opts.fill === 'transparent' ? '#000000' : opts.fill} onChange={e => setToolOption('pen', 'fill', e.target.value)} style={{ width: 28, height: 22, padding: 1, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', background: 'none', opacity: opts.mode === 'shape' ? 1 : 0.35 }} />
+        <div style={sep} />
+
+        {/* Line Cap */}
+        <span style={labelStyle}>Cap</span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {(['butt', 'round', 'square'] as const).map(cap => (
+            <button key={cap} title={cap} style={opts.lineCap === cap ? btnActive : btnInactive} onClick={() => setToolOption('pen', 'lineCap', cap)}>
+              {cap === 'butt' ? '⊢' : cap === 'round' ? '⊙' : '⊟'}
+            </button>
+          ))}
+        </div>
+        <div style={sep} />
+
+        {/* Line Join */}
+        <span style={labelStyle}>Join</span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {(['miter', 'bevel', 'round'] as const).map(join => (
+            <button key={join} title={join} style={opts.lineJoin === join ? btnActive : btnInactive} onClick={() => setToolOption('pen', 'lineJoin', join)}>
+              {join === 'miter' ? '⌟' : join === 'bevel' ? '⌐' : '⌒'}
+            </button>
+          ))}
+        </div>
+        <div style={sep} />
+
+        {/* Rubber Band */}
+        <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!opts.rubberBand} onChange={e => setToolOption('pen', 'rubberBand', e.target.checked)} style={{ cursor: 'pointer' }} />
+          Rubber Band
+        </label>
+
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, flexShrink: 0, paddingRight: 4, whiteSpace: 'nowrap' }}>
+          Click=corner • Drag=smooth • Alt=convert • Ctrl=move pts • Shift=snap 45° • Enter=finish • Esc=undo pt
+        </span>
       </div>
     )
   }

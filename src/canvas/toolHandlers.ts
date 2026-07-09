@@ -1611,88 +1611,452 @@ function activateGradient(fc: any, toolOptions: any, storeActions: any) {
 
 function activatePen(fc: any, toolOptions: any) {
   fc.isDrawingMode = false; fc.selection = false; fc.defaultCursor = 'crosshair'
-  fc.forEachObject((o: any) => { o._penSaved = { s: o.selectable, e: o.evented }; o.selectable = false; o.evented = false })
+  fc.forEachObject((o: any) => {
+    o._penSaved = { s: o.selectable, e: o.evented }
+    o.selectable = false; o.evented = false
+  })
 
-  const opts = toolOptions.pen ?? { stroke: '#000000', strokeWidth: 2, fill: 'transparent' }
+  // ── Tool options ─────────────────────────────────────────────────────────
+  const opts = toolOptions.pen ?? {
+    stroke: '#000000', strokeWidth: 2, fill: 'transparent',
+    mode: 'path', lineCap: 'butt', lineJoin: 'miter', rubberBand: true,
+  }
 
-  interface PenPoint { x: number; y: number }
-  let points: PenPoint[] = []
-  let previewPath: any = null
-  let handles: any[] = []
-  let isDragging = false
-  let dragHandle: any = null
+  // ── Anchor data model ────────────────────────────────────────────────────
+  // cp1 = "in" handle (controls the curve arriving at this point from the previous segment)
+  // cp2 = "out" handle (controls the curve leaving this point to the next segment)
+  // For a smooth point cp1 is always the mirror of cp2 (same distance, opposite direction).
+  // For a corner point the two handles are fully independent.
+  interface AnchorPoint {
+    x: number; y: number
+    cp1x: number; cp1y: number   // in-handle (absolute canvas coords)
+    cp2x: number; cp2y: number   // out-handle
+    type: 'smooth' | 'corner'
+    hasIn: boolean               // in-handle is active
+    hasOut: boolean              // out-handle is active
+  }
 
-  const buildSVGPath = (pts: PenPoint[], closed = false) => {
+  // ── Mutable state ────────────────────────────────────────────────────────
+  let anchors: AnchorPoint[] = []
+
+  // Pending anchor: being placed via click-drag right now
+  let isMidDrag = false
+  let dragStartX = 0; let dragStartY = 0
+  let pendingAnchor: AnchorPoint | null = null
+
+  // Current mouse position (used for rubber-band)
+  let mouseX = 0; let mouseY = 0
+
+  // Direct-select edit state (Ctrl/Cmd held)
+  type EditMode = 'none' | 'anchor' | 'handle'
+  let editMode: EditMode = 'none'
+  let editIdx = 0
+  let editSide: 'cp1' | 'cp2' = 'cp2'
+  let editStartX = 0; let editStartY = 0
+  let editAnchorStartX = 0; let editAnchorStartY = 0
+  let editAnchorStartCp1x = 0; let editAnchorStartCp1y = 0
+  let editAnchorStartCp2x = 0; let editAnchorStartCp2y = 0
+
+  // Alt-break: when user alt-drags an existing handle to make it independent
+  let altBreakMode = false
+
+  // Overlay objects managed by redrawVisuals
+  let overlays: any[] = []
+
+  // ── SVG path builder ─────────────────────────────────────────────────────
+  const buildBezierPath = (pts: AnchorPoint[], closed = false): string => {
     if (pts.length === 0) return ''
-    return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + (closed ? ' Z' : '')
+    let d = `M ${pts[0].x} ${pts[0].y}`
+    for (let i = 1; i < pts.length; i++) {
+      const prev = pts[i - 1]; const curr = pts[i]
+      if (prev.hasOut || curr.hasIn) {
+        d += ` C ${prev.cp2x} ${prev.cp2y} ${curr.cp1x} ${curr.cp1y} ${curr.x} ${curr.y}`
+      } else {
+        d += ` L ${curr.x} ${curr.y}`
+      }
+    }
+    if (closed && pts.length > 1) {
+      // closing segment back to first anchor
+      const last = pts[pts.length - 1]; const first = pts[0]
+      if (last.hasOut || first.hasIn) {
+        d += ` C ${last.cp2x} ${last.cp2y} ${first.cp1x} ${first.cp1y} ${first.x} ${first.y}`
+      }
+      d += ' Z'
+    }
+    return d
   }
 
-  const updatePreview = (mouseX?: number, mouseY?: number) => {
-    if (previewPath) { fc.remove(previewPath); previewPath = null }
-    if (points.length === 0) return
-    let d = buildSVGPath(points)
-    if (mouseX !== undefined) d += ` L ${mouseX} ${mouseY}`
-    previewPath = new Path(d, {
-      fill: 'transparent', stroke: opts.stroke, strokeWidth: opts.strokeWidth,
-      strokeDashArray: [5,3], selectable: false, evented: false
+  // ── Snap angle to nearest 45° ─────────────────────────────────────────────
+  const snap45 = (fromX: number, fromY: number, toX: number, toY: number) => {
+    const dx = toX - fromX; const dy = toY - fromY
+    const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
+    const dist = Math.hypot(dx, dy)
+    return { x: fromX + Math.cos(angle) * dist, y: fromY + Math.sin(angle) * dist }
+  }
+
+  // ── Hit testing ──────────────────────────────────────────────────────────
+  const hitAnchor = (x: number, y: number): number => {
+    for (let i = 0; i < anchors.length; i++) {
+      if (Math.hypot(x - anchors[i].x, y - anchors[i].y) <= 8) return i
+    }
+    return -1
+  }
+
+  const hitHandle = (x: number, y: number): { idx: number; side: 'cp1' | 'cp2' } | null => {
+    for (let i = 0; i < anchors.length; i++) {
+      const a = anchors[i]
+      if (a.hasIn && Math.hypot(x - a.cp1x, y - a.cp1y) <= 7) return { idx: i, side: 'cp1' }
+      if (a.hasOut && Math.hypot(x - a.cp2x, y - a.cp2y) <= 7) return { idx: i, side: 'cp2' }
+    }
+    return null
+  }
+
+  // ── Visual overlay helper ─────────────────────────────────────────────────
+  const addOverlay = (obj: any) => { overlays.push(obj); fc.add(obj) }
+
+  const clearOverlays = () => {
+    overlays.forEach(o => fc.remove(o)); overlays = []
+  }
+
+  const ANCHOR_COLOR = '#0078d4'
+  const HANDLE_COLOR = '#0078d4'
+
+  // Draw direction line from anchor to handle
+  const drawHandleLine = (ax: number, ay: number, hx: number, hy: number) => {
+    const l = new Line([ax, ay, hx, hy], {
+      stroke: HANDLE_COLOR, strokeWidth: 1,
+      selectable: false, evented: false, opacity: 0.7,
     } as any)
-    fc.add(previewPath); fc.renderAll()
+    addOverlay(l)
   }
 
+  // Draw circle at a handle position
+  const drawHandleCircle = (hx: number, hy: number) => {
+    const c = new Circle({
+      left: hx - 4, top: hy - 4, radius: 4,
+      fill: '#fff', stroke: HANDLE_COLOR, strokeWidth: 1.5,
+      selectable: false, evented: false,
+    } as any)
+    addOverlay(c)
+  }
+
+  // Draw square at an anchor position
+  const drawAnchorSquare = (ax: number, ay: number, isFirst = false, isLast = false) => {
+    const size = 7
+    const r = new Rect({
+      left: ax - size / 2, top: ay - size / 2, width: size, height: size,
+      fill: isLast ? ANCHOR_COLOR : '#fff',
+      stroke: ANCHOR_COLOR, strokeWidth: 1.5,
+      selectable: false, evented: false,
+      angle: isFirst ? 45 : 0,   // first anchor is a diamond (rotated square) as close-path hint
+    } as any)
+    addOverlay(r)
+  }
+
+  // ── Redraw all overlays ───────────────────────────────────────────────────
+  const redrawVisuals = () => {
+    clearOverlays()
+
+    const allAnchors: AnchorPoint[] = [...anchors]
+    if (pendingAnchor) allAnchors.push(pendingAnchor)
+
+    // ── Live path (committed anchors, no pending) ─────────────────────────
+    if (anchors.length >= 2) {
+      const d = buildBezierPath(anchors)
+      addOverlay(new Path(d, {
+        stroke: opts.stroke, strokeWidth: opts.strokeWidth,
+        fill: 'transparent',
+        strokeLineCap: opts.lineCap, strokeLineJoin: opts.lineJoin,
+        selectable: false, evented: false,
+      } as any))
+    }
+
+    // ── Rubber-band preview segment ───────────────────────────────────────
+    if (opts.rubberBand) {
+      if (isMidDrag && pendingAnchor) {
+        // Show segment from last committed anchor to pending anchor (with live handles)
+        if (anchors.length >= 1) {
+          const prev = anchors[anchors.length - 1]
+          let d: string
+          if (prev.hasOut || pendingAnchor.hasIn) {
+            d = `M ${prev.x} ${prev.y} C ${prev.cp2x} ${prev.cp2y} ${pendingAnchor.cp1x} ${pendingAnchor.cp1y} ${pendingAnchor.x} ${pendingAnchor.y}`
+          } else {
+            d = `M ${prev.x} ${prev.y} L ${pendingAnchor.x} ${pendingAnchor.y}`
+          }
+          addOverlay(new Path(d, {
+            stroke: opts.stroke, strokeWidth: opts.strokeWidth,
+            fill: 'transparent', strokeDashArray: [5, 3],
+            selectable: false, evented: false,
+          } as any))
+        }
+      } else if (!isMidDrag && anchors.length >= 1) {
+        // Show upcoming segment from last anchor to current mouse cursor
+        const last = anchors[anchors.length - 1]
+        let d: string
+        if (last.hasOut) {
+          d = `M ${last.x} ${last.y} C ${last.cp2x} ${last.cp2y} ${mouseX} ${mouseY} ${mouseX} ${mouseY}`
+        } else {
+          d = `M ${last.x} ${last.y} L ${mouseX} ${mouseY}`
+        }
+        addOverlay(new Path(d, {
+          stroke: opts.stroke, strokeWidth: opts.strokeWidth,
+          fill: 'transparent', strokeDashArray: [5, 3], opacity: 0.7,
+          selectable: false, evented: false,
+        } as any))
+      }
+    }
+
+    // ── Handle lines and circles for every anchor ─────────────────────────
+    for (const a of allAnchors) {
+      if (a.hasIn)  { drawHandleLine(a.x, a.y, a.cp1x, a.cp1y); drawHandleCircle(a.cp1x, a.cp1y) }
+      if (a.hasOut) { drawHandleLine(a.x, a.y, a.cp2x, a.cp2y); drawHandleCircle(a.cp2x, a.cp2y) }
+    }
+
+    // ── Also show pending anchor's out-handle line (the one being dragged) ─
+    // (pendingAnchor's hasOut is set during mid-drag so the block above already handles it)
+
+    // ── Anchor squares for committed anchors ─────────────────────────────
+    for (let i = 0; i < anchors.length; i++) {
+      drawAnchorSquare(anchors[i].x, anchors[i].y, i === 0, i === anchors.length - 1)
+    }
+
+    fc.renderAll()
+  }
+
+  // ── Restore locked objects ────────────────────────────────────────────────
+  const restoreObjects = () => {
+    fc.forEachObject((o: any) => {
+      if (o._penSaved) { o.selectable = o._penSaved.s; o.evented = o._penSaved.e; delete o._penSaved }
+    })
+  }
+
+  // ── Finalize path ─────────────────────────────────────────────────────────
   const finalize = (closed: boolean) => {
-    if (previewPath) { fc.remove(previewPath); previewPath = null }
-    handles.forEach(h => fc.remove(h)); handles = []
-    if (points.length < 2) { points = []; fc.renderAll(); return }
-    const d = buildSVGPath(points, closed)
+    clearOverlays()
+    pendingAnchor = null; isMidDrag = false
+    if (anchors.length < 2) { anchors = []; fc.renderAll(); return }
+    const d = buildBezierPath(anchors, closed)
+    const applyFill = closed && opts.mode === 'shape' ? opts.fill : 'transparent'
     const finalPath = new Path(d, {
       stroke: opts.stroke, strokeWidth: opts.strokeWidth,
-      fill: closed ? opts.fill : 'transparent',
-      selectable: true, evented: true
+      fill: applyFill,
+      strokeLineCap: opts.lineCap, strokeLineJoin: opts.lineJoin,
+      selectable: true, evented: true,
     } as any)
     fc.add(finalPath)
-    fc.forEachObject((o: any) => { if (o._penSaved) { o.selectable = o._penSaved.s; o.evented = o._penSaved.e; delete o._penSaved } })
+    restoreObjects()
     fc.setActiveObject(finalPath); fc.renderAll()
-    useEditorStore.getState().pushHistory('Pen Path', fc.toJSON(['customId','layerId']))
-    points = []
+    useEditorStore.getState().pushHistory('Pen Path', fc.toJSON(['customId', 'layerId']))
+    anchors = []
   }
 
+  // ── Mouse down ───────────────────────────────────────────────────────────
   const onMouseDown = (e: any) => {
-    const p = getPointer(fc, e)
-    if (points.length > 1) {
-      const first = points[0]
-      if (Math.hypot(p.x - first.x, p.y - first.y) < 10) { finalize(true); return }
+    const raw = getPointer(fc, e)
+    const nativeEvt: MouseEvent = e.e
+    const ctrl = nativeEvt.ctrlKey || nativeEvt.metaKey
+    const alt  = nativeEvt.altKey
+    const shiftKey = nativeEvt.shiftKey
+
+    // ── Direct-select (Ctrl/Cmd held): move existing anchors / handles ────
+    if (ctrl) {
+      // check handles first (smaller hit target, higher priority)
+      const hh = hitHandle(raw.x, raw.y)
+      if (hh !== null) {
+        editMode = 'handle'; editIdx = hh.idx; editSide = hh.side
+        editStartX = raw.x; editStartY = raw.y
+        const a = anchors[hh.idx]
+        editAnchorStartCp1x = a.cp1x; editAnchorStartCp1y = a.cp1y
+        editAnchorStartCp2x = a.cp2x; editAnchorStartCp2y = a.cp2y
+        altBreakMode = alt   // if alt also held, break smooth link
+        return
+      }
+      const ai = hitAnchor(raw.x, raw.y)
+      if (ai >= 0) {
+        editMode = 'anchor'; editIdx = ai
+        editStartX = raw.x; editStartY = raw.y
+        const a = anchors[ai]
+        editAnchorStartX = a.x; editAnchorStartY = a.y
+        editAnchorStartCp1x = a.cp1x; editAnchorStartCp1y = a.cp1y
+        editAnchorStartCp2x = a.cp2x; editAnchorStartCp2y = a.cp2y
+        return
+      }
+      return   // ctrl but not over anything — do nothing
     }
-    points.push(p)
-    // Show anchor dot
-    const dot = new Circle({ left: p.x-4, top: p.y-4, radius: 4,
-      fill: '#0078d4', stroke: '#fff', strokeWidth: 1,
-      selectable: false, evented: false } as any)
-    handles.push(dot); fc.add(dot)
-    updatePreview()
-  }
-  const onMouseMove = (e: any) => {
-    const p = getPointer(fc, e); updatePreview(p.x, p.y)
+
+    // ── Alt held: convert anchor point type ──────────────────────────────
+    if (alt) {
+      const ai = hitAnchor(raw.x, raw.y)
+      if (ai >= 0) {
+        const a = anchors[ai]
+        if (a.type === 'smooth') {
+          // smooth → corner: remove handles
+          a.type = 'corner'; a.hasIn = false; a.hasOut = false
+        } else {
+          // corner → smooth: start dragging out handles from this anchor
+          a.type = 'smooth'
+          isMidDrag = true
+          dragStartX = a.x; dragStartY = a.y
+          pendingAnchor = { ...a, hasIn: false, hasOut: false }
+          // replace the anchor with the pending one temporarily
+        }
+        redrawVisuals(); return
+      }
+      // alt over existing handle → will be handled in mousemove
+      const hh = hitHandle(raw.x, raw.y)
+      if (hh !== null) {
+        // Break smooth handle → corner when alt-dragging
+        editMode = 'handle'; editIdx = hh.idx; editSide = hh.side
+        editStartX = raw.x; editStartY = raw.y
+        const a = anchors[hh.idx]
+        editAnchorStartCp1x = a.cp1x; editAnchorStartCp1y = a.cp1y
+        editAnchorStartCp2x = a.cp2x; editAnchorStartCp2y = a.cp2y
+        altBreakMode = true
+        return
+      }
+    }
+
+    // ── Close path: click near first anchor ──────────────────────────────
+    if (anchors.length >= 2) {
+      const first = anchors[0]
+      if (Math.hypot(raw.x - first.x, raw.y - first.y) <= 10) {
+        finalize(true); return
+      }
+    }
+
+    // ── Place a new anchor (click-drag for smooth, click for corner) ──────
+    let ax = raw.x; let ay = raw.y
+    if (shiftKey && anchors.length > 0) {
+      const last = anchors[anchors.length - 1]
+      const snapped = snap45(last.x, last.y, raw.x, raw.y)
+      ax = snapped.x; ay = snapped.y
+    }
+    isMidDrag = true
+    dragStartX = ax; dragStartY = ay
+    pendingAnchor = {
+      x: ax, y: ay,
+      cp1x: ax, cp1y: ay,
+      cp2x: ax, cp2y: ay,
+      type: 'corner', hasIn: false, hasOut: false,
+    }
+    redrawVisuals()
   }
 
-  // Escape or Enter: finalize
+  // ── Mouse move ───────────────────────────────────────────────────────────
+  const onMouseMove = (e: any) => {
+    const raw = getPointer(fc, e)
+    const nativeEvt: MouseEvent = e.e
+    mouseX = raw.x; mouseY = raw.y
+
+    // ── Direct-select drag (Ctrl) ────────────────────────────────────────
+    if (editMode === 'anchor' && (nativeEvt.ctrlKey || nativeEvt.metaKey)) {
+      const dx = raw.x - editStartX; const dy = raw.y - editStartY
+      const a = anchors[editIdx]
+      a.x = editAnchorStartX + dx; a.y = editAnchorStartY + dy
+      a.cp1x = editAnchorStartCp1x + dx; a.cp1y = editAnchorStartCp1y + dy
+      a.cp2x = editAnchorStartCp2x + dx; a.cp2y = editAnchorStartCp2y + dy
+      redrawVisuals(); return
+    }
+
+    if (editMode === 'handle') {
+      const a = anchors[editIdx]
+      const dx = raw.x - editStartX; const dy = raw.y - editStartY
+      if (editSide === 'cp2') {
+        a.cp2x = editAnchorStartCp2x + dx; a.cp2y = editAnchorStartCp2y + dy
+        a.hasOut = true
+        if (a.type === 'smooth' && !altBreakMode) {
+          // mirror cp1
+          const odx = a.cp2x - a.x; const ody = a.cp2y - a.y
+          a.cp1x = a.x - odx; a.cp1y = a.y - ody; a.hasIn = true
+        } else {
+          a.type = 'corner'   // alt-drag breaks smooth link
+        }
+      } else {
+        a.cp1x = editAnchorStartCp1x + dx; a.cp1y = editAnchorStartCp1y + dy
+        a.hasIn = true
+        if (a.type === 'smooth' && !altBreakMode) {
+          const odx = a.cp1x - a.x; const ody = a.cp1y - a.y
+          a.cp2x = a.x - odx; a.cp2y = a.y - ody; a.hasOut = true
+        } else {
+          a.type = 'corner'
+        }
+      }
+      redrawVisuals(); return
+    }
+
+    // ── Dragging out handles for a new anchor (mid-drag) ─────────────────
+    if (isMidDrag && pendingAnchor) {
+      const dx = raw.x - dragStartX; const dy = raw.y - dragStartY
+      // Only activate handle dragging if user actually moved enough (avoids accidental handles on simple clicks)
+      const HANDLE_THRESHOLD = 3
+      if (Math.hypot(dx, dy) > HANDLE_THRESHOLD) {
+        // out-handle: direction of drag
+        pendingAnchor.cp2x = dragStartX + dx; pendingAnchor.cp2y = dragStartY + dy
+        // in-handle: mirror of out-handle
+        pendingAnchor.cp1x = dragStartX - dx; pendingAnchor.cp1y = dragStartY - dy
+        pendingAnchor.type = 'smooth'; pendingAnchor.hasIn = true; pendingAnchor.hasOut = true
+      }
+    }
+
+    redrawVisuals()
+  }
+
+  // ── Mouse up ─────────────────────────────────────────────────────────────
+  const onMouseUp = (e: any) => {
+    // Release edit modes
+    if (editMode !== 'none') {
+      editMode = 'none'; altBreakMode = false; return
+    }
+
+    if (isMidDrag && pendingAnchor) {
+      anchors.push({ ...pendingAnchor })
+      pendingAnchor = null; isMidDrag = false
+      redrawVisuals()
+    }
+  }
+
+  // ── Keyboard handler ──────────────────────────────────────────────────────
   const keyHandler = (ev: KeyboardEvent) => {
-    if (ev.key === 'Enter') { finalize(false) }
+    const tag = (ev.target as HTMLElement)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+    if (ev.key === 'Enter') {
+      ev.preventDefault()
+      if (anchors.length >= 2) finalize(false)
+    }
     if (ev.key === 'Escape') {
-      if (previewPath) { fc.remove(previewPath); previewPath = null }
-      handles.forEach(h => fc.remove(h)); handles = []
-      points = []; fc.renderAll()
+      ev.preventDefault()
+      if (anchors.length === 0) {
+        // nothing to do — tool stays active
+        clearOverlays(); fc.renderAll()
+        return
+      }
+      if (isMidDrag) {
+        // cancel the in-progress drag
+        pendingAnchor = null; isMidDrag = false
+        redrawVisuals(); return
+      }
+      // pop last anchor
+      anchors.pop(); redrawVisuals()
+    }
+    if ((ev.key === 'Delete' || ev.key === 'Backspace') && anchors.length > 0) {
+      if (!isMidDrag) { ev.preventDefault(); anchors.pop(); redrawVisuals() }
     }
   }
   document.addEventListener('keydown', keyHandler, { capture: true })
 
-  fc.on('mouse:down', onMouseDown); fc.on('mouse:move', onMouseMove)
+  fc.on('mouse:down', onMouseDown)
+  fc.on('mouse:move', onMouseMove)
+  fc.on('mouse:up', onMouseUp)
+
   return () => {
-    if (previewPath) { fc.remove(previewPath); previewPath = null }
-    handles.forEach(h => fc.remove(h)); handles = []
-    points = []; fc.defaultCursor = 'default'
-    fc.forEachObject((o: any) => { if (o._penSaved) { o.selectable = o._penSaved.s; o.evented = o._penSaved.e; delete o._penSaved } })
+    clearOverlays()
+    pendingAnchor = null; isMidDrag = false
+    anchors = []
+    fc.defaultCursor = 'default'
+    restoreObjects()
     document.removeEventListener('keydown', keyHandler, { capture: true })
-    offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove })
+    offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:up': onMouseUp })
   }
 }
 

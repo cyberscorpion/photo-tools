@@ -108,7 +108,7 @@ export const useEditorStore = create((set, get) => ({
     dodge:             { size: 30, exposure: 50 },
     burn:              { size: 30, exposure: 50 },
     'blur-brush':      { size: 30, strength: 50 },
-    pen:               { stroke: '#000000', strokeWidth: 2, fill: 'transparent' },
+    pen:               { stroke: '#000000', strokeWidth: 2, fill: 'transparent', mode: 'path', lineCap: 'butt', lineJoin: 'miter', rubberBand: true },
   },
 
   // ── Colors ──────────────────────────────────────────────────────────────────

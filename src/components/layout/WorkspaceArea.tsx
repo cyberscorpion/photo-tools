@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/editorStore.js'
 import CheckerBackground from '../canvas/CheckerBackground.jsx'
 import CanvasStage from '../canvas/CanvasStage.jsx'
 import { setWorkspaceContainer } from '../../canvas/viewportManager.js'
+import { CANVAS_PAD } from '../../canvas/fabricManager.js'
 
 export default function WorkspaceArea({ onCursorMove }) {
   const imageSize = useEditorStore((s) => s.imageSize)
@@ -83,19 +84,24 @@ export default function WorkspaceArea({ onCursorMove }) {
             position: 'relative',
           }}
         >
-          {/* Canvas wrapper: CSS-scaled for visual zoom */}
+        {/* Canvas wrapper: CSS-scaled for visual zoom.
+             top/left are offset by -CANVAS_PAD*zoom so the image (placed at
+             Fabric (PAD,PAD)) visually aligns with the phantom-div origin.
+             overflow:visible lets the Fabric canvas (PAD pixels larger on each
+             side) render handles outside the image boundary without clipping. */}
           <div
             style={{
               position: 'absolute',
-              top: 0,
-              left: 0,
+              top: -CANVAS_PAD * zoom,
+              left: -CANVAS_PAD * zoom,
               width: canvasW,
               height: canvasH,
               transform: `scale(${zoom})`,
               transformOrigin: '0 0',
+              overflow: 'visible',
             }}
           >
-            <CheckerBackground width={canvasW} height={canvasH} />
+            <CheckerBackground width={canvasW} height={canvasH} offsetX={CANVAS_PAD} offsetY={CANVAS_PAD} zoom={zoom} />
             <CanvasStage />
           </div>
         </div>

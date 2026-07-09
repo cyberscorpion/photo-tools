@@ -1,5 +1,15 @@
 import { Canvas } from 'fabric'
 
+/**
+ * Extra pixel buffer added on every side of the Fabric canvas beyond the image
+ * dimensions.  Handles/controls drawn by Fabric on the upper-canvas are clipped
+ * at the canvas element's pixel boundary; this padding gives them space to render
+ * even when the selection or crop rect sits flush against the image edge.
+ * WorkspaceArea compensates with a matching CSS offset so the image appears at
+ * the same visual position.
+ */
+export const CANVAS_PAD = 60
+
 /** @type {Canvas|null} */
 let _canvas = null
 

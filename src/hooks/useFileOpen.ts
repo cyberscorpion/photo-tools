@@ -1,7 +1,7 @@
 // Handles opening an image file into the Fabric canvas
 import { useRef, useCallback } from 'react'
 import { useEditorStore } from '../store/editorStore.js'
-import { getFabric, initFabric } from '../canvas/fabricManager.js'
+import { getFabric, initFabric, CANVAS_PAD } from '../canvas/fabricManager.js'
 import { FabricImage } from 'fabric'
 
 export function useFileOpen() {
@@ -30,7 +30,7 @@ export function useFileOpen() {
         if (el) fc = initFabric(el, w, h)
       }
       if (!fc) return
-      fc.setWidth(w); fc.setHeight(h)
+      fc.setWidth(w + 2 * CANVAS_PAD); fc.setHeight(h + 2 * CANVAS_PAD)
       // Reset Fabric's internal viewport to identity so getViewportPoint()
       // returns correct canvas-pixel coordinates unaffected by any stale zoom.
       fc.setViewportTransform([1, 0, 0, 1, 0, 0])
@@ -45,7 +45,7 @@ export function useFileOpen() {
         const fabricImg = await FabricImage.fromURL(dataURL)
         // Use the layer's UUID — not the hardcoded 'background' string — so
         // layerBridge.syncLayers() can find this object and apply visibility/opacity
-        fabricImg.set({ left: 0, top: 0, selectable: false, evented: false, layerId: bgLayerId } as any)
+        fabricImg.set({ left: CANVAS_PAD, top: CANVAS_PAD, selectable: false, evented: false, layerId: bgLayerId } as any)
         fc.add(fabricImg)
         fc.renderAll()
         setFileName(file.name)

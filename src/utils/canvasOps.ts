@@ -1,4 +1,4 @@
-import { getFabric, setSuppressHistoryBridge } from '../canvas/fabricManager.ts'
+import { getFabric, setSuppressHistoryBridge, CANVAS_PAD } from '../canvas/fabricManager.ts'
 
 // All layerIds that are overlays / non-content objects — never treat these as the background image
 const OVERLAY_LAYER_IDS = new Set(['contour', 'selection', 'crop-overlay', 'clone-overlay'])
@@ -33,13 +33,18 @@ export async function reloadCanvasAsImage(): Promise<void> {
   if (!fc) return
   const lowerEl = getLowerCanvasEl()
   if (!lowerEl) return
-  const w = fc.width as number
-  const h = fc.height as number
 
-  // Capture modified lower canvas FIRST (before Fabric can overwrite it)
+  // Clip to the image area only (strip the CANVAS_PAD border).  This prevents
+  // the transparent padding from accumulating across successive operations and
+  // ensures export / clipboard always see the correct pixel dimensions.
+  const imgW = fc.width  - 2 * CANVAS_PAD
+  const imgH = fc.height - 2 * CANVAS_PAD
+  if (imgW <= 0 || imgH <= 0) return
+
+  // Capture image-area pixels FIRST (before Fabric can overwrite them)
   const snap = document.createElement('canvas')
-  snap.width = w; snap.height = h
-  snap.getContext('2d')!.drawImage(lowerEl, 0, 0)
+  snap.width = imgW; snap.height = imgH
+  snap.getContext('2d')!.drawImage(lowerEl, CANVAS_PAD, CANVAS_PAD, imgW, imgH, 0, 0, imgW, imgH)
   const blob = await new Promise<Blob>((res) => snap.toBlob(b => res(b!), 'image/png'))
   const dataURL = await new Promise<string>((res) => {
     const reader = new FileReader()
@@ -61,7 +66,7 @@ export async function reloadCanvasAsImage(): Promise<void> {
     if (bg) fc.remove(bg)
 
     const img = await FabricImage.fromURL(dataURL)
-    img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: bgLayerId } as any)
+    img.set({ left: CANVAS_PAD, top: CANVAS_PAD, selectable: false, evented: false, layerId: bgLayerId } as any)
     fc.add(img)
     fc.sendObjectToBack(img as any)
     fc.renderAll()

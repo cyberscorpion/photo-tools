@@ -1,4 +1,15 @@
-import { getFabric } from './fabricManager.js'
+import { getFabric, CANVAS_PAD } from './fabricManager.js'
+import { getLowerCanvasEl } from '../utils/canvasOps.js'
+
+/** Clip the Fabric lower-canvas to the image area (stripping CANVAS_PAD on each side). */
+function clippedImageCanvas(lowerEl: HTMLCanvasElement, fc: any): HTMLCanvasElement {
+  const imgW = fc.width  - 2 * CANVAS_PAD
+  const imgH = fc.height - 2 * CANVAS_PAD
+  const off = document.createElement('canvas')
+  off.width = imgW; off.height = imgH
+  off.getContext('2d')!.drawImage(lowerEl, CANVAS_PAD, CANVAS_PAD, imgW, imgH, 0, 0, imgW, imgH)
+  return off
+}
 
 /** Temporarily hide all selection-overlay objects, run `fn`, then restore. */
 function withoutSelectionOverlay<T>(fc: any, fn: () => T): T {
@@ -24,13 +35,15 @@ export function downloadImage(format = 'png', quality = 92, fileName = 'export')
   const fc = getFabric()
   if (!fc) throw new Error('Fabric canvas is not initialised.')
 
-  const dataURL = withoutSelectionOverlay(fc, () =>
-    fc.toDataURL({
-      format,
-      quality: quality / 100,
-      multiplier: 1,
-    })
-  )
+  const dataURL = withoutSelectionOverlay(fc, () => {
+    // Re-render so overlay objects are hidden, then read only the image area
+    const lowerEl = getLowerCanvasEl()
+    if (!lowerEl) return ''
+    return clippedImageCanvas(lowerEl, fc).toDataURL(
+      format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png',
+      quality / 100
+    )
+  })
 
   const ext = format === 'jpeg' ? 'jpg' : format
   // Sanitize fileName: allow only alphanumerics, hyphens, underscores, and dots
@@ -68,8 +81,9 @@ export function copyToClipboard() {
     overlays.forEach(o => { o.visible = false })
     fc.renderAll()
 
-    const canvasEl = fc.getElement()
-    canvasEl.toBlob((blob) => {
+    const lowerEl = getLowerCanvasEl()
+    if (!lowerEl) { reject(new Error('Canvas not available.')); return }
+    clippedImageCanvas(lowerEl, fc).toBlob((blob) => {
       overlays.forEach(o => { o.visible = true })
       fc.renderAll()
 

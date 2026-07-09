@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { useEditorStore } from '../../store/editorStore.js'
-import { initFabric, disposeFabric, setEventBridge, getFabric, setLayerIdGetter } from '../../canvas/fabricManager.js'
+import { initFabric, disposeFabric, setEventBridge, getFabric, setLayerIdGetter, CANVAS_PAD } from '../../canvas/fabricManager.js'
 import { activateTool, deactivateTool } from '../../canvas/toolHandlers.js'
 import ExportDialog from '../dialogs/ExportDialog.jsx'
 import { applyAdjustments } from '../../canvas/adjustmentEngine.js'
@@ -28,7 +28,7 @@ export default function CanvasStage() {
   useEffect(() => {
     if (!canvasRef.current) return
 
-    initFabric(canvasRef.current, canvasW, canvasH)
+    initFabric(canvasRef.current, canvasW + 2 * CANVAS_PAD, canvasH + 2 * CANVAS_PAD)
     // Wire the active-layer getter so fabricManager can auto-tag new objects
     setLayerIdGetter(() => useEditorStore.getState().activeLayerId)
 
@@ -45,7 +45,7 @@ export default function CanvasStage() {
     if (imageSize.w === 0 && imageSize.h === 0) return
     const fc = getFabric()
     if (!fc) return
-    fc.setDimensions({ width: canvasW, height: canvasH })
+    fc.setDimensions({ width: canvasW + 2 * CANVAS_PAD, height: canvasH + 2 * CANVAS_PAD })
   }, [canvasW, canvasH, imageSize.w, imageSize.h])
 
   // Listen for Ctrl+S export shortcut

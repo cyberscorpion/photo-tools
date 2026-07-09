@@ -1,6 +1,6 @@
 import { IText, Rect, Ellipse, Path, PencilBrush, FabricImage, Line, Polygon, Circle } from 'fabric'
 import { buildPolygonPoints } from '../utils/canvasOps.ts'
-import { getFabric, setSuppressHistoryBridge } from './fabricManager.js'
+import { getFabric, setSuppressHistoryBridge, CANVAS_PAD } from './fabricManager.js'
 import { panContainer } from './viewportManager.js'
 import { useEditorStore } from '../store/editorStore.js'
 import { showSelectionRect, showSelectionEllipse, showSelectionPath, clearSelectionOverlay } from './selectionOverlay.ts'
@@ -788,8 +788,10 @@ function activateCrop(fc) {
     }
   }
 
-  // ── Create initial crop rect covering the full canvas ─────────────────────
-  cropRect = makeCropRect(0, 0, fc.width, fc.height)
+  // ── Create initial crop rect covering the image area (not the padding border)
+  const imgW = fc.width  - 2 * CANVAS_PAD
+  const imgH = fc.height - 2 * CANVAS_PAD
+  cropRect = makeCropRect(CANVAS_PAD, CANVAS_PAD, imgW, imgH)
   fc.add(cropRect)
   fc.setActiveObject(cropRect)
   updateOverlay()
@@ -839,9 +841,9 @@ function activateCrop(fc) {
     if (!cropDrawing) return
     cropDrawing = false
     if (!cropRect || cropRect.width < 4 || cropRect.height < 4) {
-      // Tiny drag → restore full-canvas crop rect
+      // Tiny drag → restore image-area crop rect
       if (cropRect) { fc.remove(cropRect); cropRect = null }
-      cropRect = makeCropRect(0, 0, fc.width, fc.height)
+      cropRect = makeCropRect(CANVAS_PAD, CANVAS_PAD, fc.width - 2 * CANVAS_PAD, fc.height - 2 * CANVAS_PAD)
       fc.add(cropRect)
     }
     fc.setActiveObject(cropRect)
@@ -955,11 +957,11 @@ function activateCrop(fc) {
     const croppedDataURL = offscreen.toDataURL('image/png')
 
     fc.clear()
-    fc.setWidth(w)
-    fc.setHeight(h)
+    fc.setWidth(w + 2 * CANVAS_PAD)
+    fc.setHeight(h + 2 * CANVAS_PAD)
 
     const img = await FabricImage.fromURL(croppedDataURL)
-    img.set({ left: 0, top: 0, selectable: false, evented: false, layerId: 'background' })
+    img.set({ left: CANVAS_PAD, top: CANVAS_PAD, selectable: false, evented: false, layerId: 'background' })
     fc.add(img)
     fc.renderAll()
 

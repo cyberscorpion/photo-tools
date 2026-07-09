@@ -312,6 +312,54 @@ export function boxBlur(data: Uint8ClampedArray, w: number, h: number, passes = 
   }
 }
 
+/**
+ * Generate a binary pixel mask for an ellipse on a canvas of (cw × ch) pixels.
+ * Pixels whose centers fall inside the ellipse (cx, cy, rx, ry) are set to 1.
+ */
+export function makeEllipseMask(
+  cw: number, ch: number,
+  cx: number, cy: number,
+  rx: number, ry: number
+): Uint8Array {
+  const mask = new Uint8Array(cw * ch)
+  const x0 = Math.max(0, Math.floor(cx - rx))
+  const x1 = Math.min(cw - 1, Math.ceil(cx + rx))
+  const y0 = Math.max(0, Math.floor(cy - ry))
+  const y1 = Math.min(ch - 1, Math.ceil(cy + ry))
+  const rx2 = rx * rx, ry2 = ry * ry
+  for (let y = y0; y <= y1; y++) {
+    const dy = y + 0.5 - cy
+    for (let x = x0; x <= x1; x++) {
+      const dx = x + 0.5 - cx
+      if (dx * dx / rx2 + dy * dy / ry2 <= 1) mask[y * cw + x] = 1
+    }
+  }
+  return mask
+}
+
+/**
+ * Generate a binary pixel mask for an arbitrary closed polygon on a canvas
+ * of (cw × ch) pixels. Uses an offscreen canvas fill for accuracy.
+ */
+export function makePolygonMask(
+  cw: number, ch: number,
+  points: { x: number; y: number }[]
+): Uint8Array {
+  const off = document.createElement('canvas')
+  off.width = cw; off.height = ch
+  const ctx = off.getContext('2d')!
+  ctx.fillStyle = '#fff'
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y)
+  ctx.closePath()
+  ctx.fill()
+  const d = ctx.getImageData(0, 0, cw, ch).data
+  const mask = new Uint8Array(cw * ch)
+  for (let i = 0; i < cw * ch; i++) { if (d[i * 4 + 3] > 127) mask[i] = 1 }
+  return mask
+}
+
 /** Build polygon point array for a regular N-gon */
 export function buildPolygonPoints(
   cx: number, cy: number, radius: number, sides: number, startAngle = -Math.PI/2

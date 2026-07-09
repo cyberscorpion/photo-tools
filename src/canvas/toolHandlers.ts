@@ -4,7 +4,7 @@ import { getFabric, setSuppressHistoryBridge } from './fabricManager.js'
 import { panContainer } from './viewportManager.js'
 import { useEditorStore } from '../store/editorStore.js'
 import { showSelectionRect, showSelectionEllipse, showSelectionPath, clearSelectionOverlay } from './selectionOverlay.ts'
-import { floodFill, applyMaskFill, applyMaskErase, applyFeather, maskToOutlinePath, hexToRgbArr, getLowerCtx, getLowerCanvasEl, reloadCanvasAsImage, sampleCircle, boxBlur } from '../utils/canvasOps.ts'
+import { floodFill, applyMaskFill, applyMaskErase, applyFeather, maskToOutlinePath, makeEllipseMask, makePolygonMask, hexToRgbArr, getLowerCtx, getLowerCanvasEl, reloadCanvasAsImage, sampleCircle, boxBlur } from '../utils/canvasOps.ts'
 
 // ── Internal state ────────────────────────────────────────────────────────────
 
@@ -902,96 +902,72 @@ function activateEyedropper(fc, _toolOptions, storeActions) {
   }
 }
 
-function activateLasso(fc) {
-  fc.isDrawingMode = false
-  fc.selection = false
-  fc.defaultCursor = 'crosshair'
+/** Compute axis-aligned bounding box from a set of points, clamped to canvas. */
+function boundsFromPoints(
+  pts: { x: number; y: number }[], cw: number, ch: number
+): { x: number; y: number; w: number; h: number } {
+  let minX = cw, minY = ch, maxX = 0, maxY = 0
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y
+  }
+  const x = Math.max(0, Math.floor(minX)), y = Math.max(0, Math.floor(minY))
+  return { x, y, w: Math.min(cw, Math.ceil(maxX)) - x, h: Math.min(ch, Math.ceil(maxY)) - y }
+}
 
-  let lassoPoints = []
-  let lassoPath = null
+function activateLasso(fc: any) {
+  fc.isDrawingMode = false; fc.selection = false; fc.defaultCursor = 'crosshair'
+  fc.discardActiveObject()
+  fc.forEachObject((o: any) => { o._mSel = o.selectable; o._mEvt = o.evented; o.selectable = false; o.evented = false })
+
+  let lassoPoints: { x: number; y: number }[] = []
+  let previewPath: any = null
   let lassoDrawing = false
-  let pathString = ''
 
-  const onMouseDown = (e) => {
+  const onMouseDown = (e: any) => {
     lassoDrawing = true
-    lassoPoints = []
-    const point = getPointer(fc, e)
-    lassoPoints.push(point)
-    pathString = `M ${point.x} ${point.y}`
-
-    if (lassoPath) {
-      fc.remove(lassoPath)
-      lassoPath = null
-    }
+    lassoPoints = [getPointer(fc, e)]
+    clearSelectionOverlay()
+    if (previewPath) { fc.remove(previewPath); previewPath = null }
   }
 
-  const onMouseMove = (e) => {
+  const onMouseMove = (e: any) => {
     if (!lassoDrawing) return
-    const point = getPointer(fc, e)
-    lassoPoints.push(point)
-    pathString += ` L ${point.x} ${point.y}`
-
-    if (lassoPath) fc.remove(lassoPath)
-
-    lassoPath = new Path(pathString + ' Z', {
-      fill: 'rgba(59,130,246,0.15)',
-      stroke: '#3b82f6',
-      strokeWidth: 1,
-      strokeDashArray: [4, 4],
-      selectable: false,
-      evented: false,
-    })
-    fc.add(lassoPath)
-    fc.renderAll()
+    lassoPoints.push(getPointer(fc, e))
+    if (previewPath) { fc.remove(previewPath); previewPath = null }
+    const d = lassoPoints.map((p, i) => `${i===0?'M':'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
+    previewPath = new Path(d, {
+      fill: 'rgba(0,120,215,0.1)', stroke: '#0078d4', strokeWidth: 1,
+      strokeDashArray: [4,3], selectable: false, evented: false, layerId: 'selection'
+    } as any)
+    fc.add(previewPath); fc.renderAll()
   }
 
   const onMouseUp = () => {
     if (!lassoDrawing) return
     lassoDrawing = false
+    if (previewPath) { fc.remove(previewPath); previewPath = null }
+    if (lassoPoints.length < 3) { fc.renderAll(); lassoPoints = []; return }
 
-    if (lassoPoints.length < 3) {
-      if (lassoPath) { fc.remove(lassoPath); lassoPath = null }
-      fc.renderAll()
-      return
-    }
-
-    // Close the path and finalise as a selection mask
-    pathString += ' Z'
-    if (lassoPath) fc.remove(lassoPath)
-
-    lassoPath = new Path(pathString, {
-      fill: 'rgba(59,130,246,0.15)',
-      stroke: '#3b82f6',
-      strokeWidth: 1,
-      strokeDashArray: [4, 4],
-      selectable: true,
-      evented: true,
-    })
-    fc.add(lassoPath)
-    fc.setActiveObject(lassoPath)
-    fc.renderAll()
-
+    const cw = fc.width!, ch = fc.height!
+    const pts = lassoPoints.slice()
     lassoPoints = []
-    pathString = ''
+    const mask = makePolygonMask(cw, ch, pts)
+    const bounds = boundsFromPoints(pts, cw, ch)
+    const pathStr = pts.map((p, i) => `${i===0?'M':'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
+    showSelectionPath(pathStr)
+    useEditorStore.getState().setActiveSelection({ type: 'lasso', bounds, mask })
   }
 
-  fc.on('mouse:down', onMouseDown)
-  fc.on('mouse:move', onMouseMove)
-  fc.on('mouse:up', onMouseUp)
-
+  fc.on('mouse:down', onMouseDown); fc.on('mouse:move', onMouseMove); fc.on('mouse:up', onMouseUp)
   return () => {
-    lassoDrawing = false
-    lassoPoints = []
-    if (lassoPath) {
-      fc.remove(lassoPath)
-      lassoPath = null
-    }
+    lassoDrawing = false; lassoPoints = []
+    if (previewPath) { fc.remove(previewPath); previewPath = null }
+    clearSelectionOverlay()
+    fc.forEachObject((o: any) => { if ('_mSel' in o) { o.selectable = o._mSel; delete o._mSel; o.evented = o._mEvt; delete o._mEvt } })
     fc.defaultCursor = 'default'
-    offAll(fc, {
-      'mouse:down': onMouseDown,
-      'mouse:move': onMouseMove,
-      'mouse:up': onMouseUp,
-    })
+    useEditorStore.getState().clearSelection?.()
+    offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:up': onMouseUp })
   }
 }
 
@@ -1071,7 +1047,9 @@ function activateMarqueeEllipse(fc: any) {
     fc.remove(preview); preview = null
     if (b.w < 2 || b.h < 2) { fc.renderAll(); return }
     showSelectionEllipse(b)
-    useEditorStore.getState().setActiveSelection({ type: 'ellipse', bounds: b, mask: null })
+    const cw = fc.width!, ch = fc.height!
+    const mask = makeEllipseMask(cw, ch, b.x + b.w / 2, b.y + b.h / 2, b.w / 2, b.h / 2)
+    useEditorStore.getState().setActiveSelection({ type: 'ellipse', bounds: b, mask })
   }
   fc.on('mouse:down', onMouseDown); fc.on('mouse:move', onMouseMove); fc.on('mouse:up', onMouseUp)
   return () => {
@@ -1115,6 +1093,8 @@ function activateMagicWand(fc: any, toolOptions: any) {
 
 function activateLassoPoly(fc: any) {
   fc.isDrawingMode = false; fc.selection = false; fc.defaultCursor = 'crosshair'
+  fc.discardActiveObject()
+  fc.forEachObject((o: any) => { o._mSel = o.selectable; o._mEvt = o.evented; o.selectable = false; o.evented = false })
   let points: { x: number; y: number }[] = []
   let previewLine: any = null
 
@@ -1129,42 +1109,34 @@ function activateLassoPoly(fc: any) {
     } as any)
     fc.add(previewLine); fc.renderAll()
   }
-  const onMouseMove = (e: any) => {
-    const p = getPointer(fc, e)
-    updatePreview(p.x, p.y)
+
+  const finalize = (pts: { x: number; y: number }[]) => {
+    if (previewLine) { fc.remove(previewLine); previewLine = null }
+    const cw = fc.width!, ch = fc.height!
+    const mask = makePolygonMask(cw, ch, pts)
+    const bounds = boundsFromPoints(pts, cw, ch)
+    const pathStr = pts.map((pt, i) => `${i===0?'M':'L'} ${pt.x} ${pt.y}`).join(' ') + ' Z'
+    showSelectionPath(pathStr)
+    useEditorStore.getState().setActiveSelection({ type: 'lasso', bounds, mask })
+    points = []
   }
+
+  const onMouseMove = (e: any) => { const p = getPointer(fc, e); updatePreview(p.x, p.y) }
   const onMouseDown = (e: any) => {
     const p = getPointer(fc, e)
     if (points.length > 2) {
-      const first = points[0]
-      const dist = Math.hypot(p.x - first.x, p.y - first.y)
-      if (dist < 10) {
-        // Close path
-        if (previewLine) { fc.remove(previewLine); previewLine = null }
-        const pathStr = points.map((pt, i) => `${i===0?'M':'L'} ${pt.x} ${pt.y}`).join(' ') + ' Z'
-        showSelectionPath(pathStr)
-        useEditorStore.getState().setActiveSelection({ type: 'lasso', bounds: { x:0,y:0,w:fc.width!,h:fc.height! }, mask: null })
-        points = []
-        return
-      }
+      if (Math.hypot(p.x - points[0].x, p.y - points[0].y) < 10) { finalize(points.slice()); return }
     }
-    points.push(p)
-    updatePreview()
+    points.push(p); updatePreview()
   }
-  const onDblClick = () => {
-    if (points.length >= 3) {
-      if (previewLine) { fc.remove(previewLine); previewLine = null }
-      const pathStr = points.map((pt, i) => `${i===0?'M':'L'} ${pt.x} ${pt.y}`).join(' ') + ' Z'
-      showSelectionPath(pathStr)
-      useEditorStore.getState().setActiveSelection({ type: 'lasso', bounds: { x:0,y:0,w:fc.width!,h:fc.height! }, mask: null })
-      points = []
-    }
-  }
+  const onDblClick = () => { if (points.length >= 3) finalize(points.slice()) }
+
   fc.on('mouse:down', onMouseDown); fc.on('mouse:move', onMouseMove); fc.on('mouse:dblclick', onDblClick)
   return () => {
     points = []
     if (previewLine) { fc.remove(previewLine); previewLine = null }
     clearSelectionOverlay()
+    fc.forEachObject((o: any) => { if ('_mSel' in o) { o.selectable = o._mSel; delete o._mSel; o.evented = o._mEvt; delete o._mEvt } })
     useEditorStore.getState().clearSelection?.()
     offAll(fc, { 'mouse:down': onMouseDown, 'mouse:move': onMouseMove, 'mouse:dblclick': onDblClick })
   }

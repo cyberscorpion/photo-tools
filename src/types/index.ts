@@ -90,7 +90,7 @@ export interface ToolConfig {
 // ─── Tool Options ─────────────────────────────────────────────────────────────
 export interface BrushOptions   { size: number; hardness: number; opacity: number; color: string }
 export interface EraserOptions  { size: number }
-export interface TextOptions    { font: string; size: number; color: string; bold: boolean; italic: boolean }
+export interface TextOptions    { font: string; size: number; color: string; bold: boolean; italic: boolean; underline: boolean }
 export interface ShapeOptions   { fill: string; stroke: string; strokeWidth: number }
 
 export interface ToolOptions {

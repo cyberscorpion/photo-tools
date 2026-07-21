@@ -92,7 +92,7 @@ export const useEditorStore = create((set, get) => ({
   toolOptions: {
     brush: { size: 12, hardness: 80, opacity: 100, color: '#000000' },
     eraser: { size: 20 },
-    text: { font: 'Arial', size: 24, color: '#000000', bold: false, italic: false },
+    text: { font: 'Arial', size: 24, color: '#000000', bold: false, italic: false, underline: false },
     rect: { fill: '#ff0000', stroke: 'transparent', strokeWidth: 0 },
     ellipse: { fill: '#0000ff', stroke: 'transparent', strokeWidth: 0 },
     'marquee-rect':    { feather: 0, mode: 'new' },

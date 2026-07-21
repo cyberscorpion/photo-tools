@@ -562,6 +562,12 @@ export default function OptionsBar() {
         >
           <em>I</em>
         </button>
+        <button
+          style={toggleBtnStyle(opts.underline)}
+          onClick={() => setToolOption('text', 'underline', !opts.underline)}
+        >
+          <span style={{ textDecoration: 'underline' }}>U</span>
+        </button>
         <div style={sliderWrapStyle}>
           <span style={labelStyle}>Color</span>
           <input

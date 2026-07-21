@@ -300,6 +300,7 @@ function activateText(fc, toolOptions) {
       fontFamily: opts.font ?? 'Arial',
       fontWeight: opts.bold ? 'bold' : 'normal',
       fontStyle: opts.italic ? 'italic' : 'normal',
+      underline: opts.underline ?? false,
     })
 
     fc.add(text)
